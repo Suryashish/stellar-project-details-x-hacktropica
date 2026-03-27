@@ -1,6 +1,9 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env, String,
+    Symbol, Vec,
+};
 
 #[contracttype]
 #[derive(Clone)]
@@ -18,6 +21,15 @@ pub struct TicketingContractItem {
 pub enum TicketingContractDataKey {
     IdList,
     Item(Symbol),
+    Count,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum TicketingContractError {
+    InvalidTitle = 1,
+    InvalidTimestamp = 2,
 }
 
 #[contract]
@@ -25,12 +37,31 @@ pub struct TicketingContract;
 
 #[contractimpl]
 impl TicketingContract {
+    fn count_key() -> TicketingContractDataKey {
+        TicketingContractDataKey::Count
+    }
+
     fn ids_key() -> TicketingContractDataKey {
         TicketingContractDataKey::IdList
     }
 
     fn item_key(id: &Symbol) -> TicketingContractDataKey {
         TicketingContractDataKey::Item(id.clone())
+    }
+
+    fn validate_item(env: &Env, title: &String, updated_at: u64) {
+        if title.len() == 0 {
+            panic_with_error!(env, TicketingContractError::InvalidTitle);
+        }
+
+        if updated_at == 0 {
+            panic_with_error!(env, TicketingContractError::InvalidTimestamp);
+        }
+    }
+
+    fn increment_count(env: &Env) {
+        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
+        env.storage().instance().set(&Self::count_key(), &(count + 1));
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
@@ -52,6 +83,7 @@ impl TicketingContract {
 
     pub fn create_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
         owner.require_auth();
+        Self::validate_item(&env, &title, updated_at);
 
         let item = TicketingContractItem {
             owner,
@@ -62,12 +94,18 @@ impl TicketingContract {
             updated_at,
         };
 
-        env.storage().instance().set(&Self::item_key(&id), &item);
+        let key = Self::item_key(&id);
+        let exists = env.storage().instance().has(&key);
+
+        env.storage().instance().set(&key, &item);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
+            if !exists {
+                Self::increment_count(&env);
+            }
         }
     }
 
@@ -76,6 +114,7 @@ impl TicketingContract {
         let maybe_item: Option<TicketingContractItem> = env.storage().instance().get(&key);
 
         if let Some(mut item) = maybe_item {
+            Self::validate_item(&env, &item.title, updated_at);
             item.owner.require_auth();
             item.state = state;
             item.notes = notes;
@@ -93,5 +132,9 @@ impl TicketingContract {
 
     pub fn list_ids(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
+    }
+
+    pub fn get_count(env: Env) -> u32 {
+        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
     }
 }

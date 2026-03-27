@@ -9,6 +9,13 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
+const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
+const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+
+const requireConfig = () => {
+    if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
+    if (!DEMO_ADDR) throw new Error("Set DEMO_ADDR in lib.js/stellar.js");
+};
 
 export const checkConnection = async () => {
     try {
@@ -64,8 +71,7 @@ const invokeWrite = async (method, args = []) => {
 };
 
 const invokeRead = async (method, args = []) => {
-    if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
-    if (!DEMO_ADDR) throw new Error("Set DEMO_ADDR in lib.js/stellar.js");
+    requireConfig();
 
     const tx = new TransactionBuilder(new Account(DEMO_ADDR, "0"), {
         fee: "100",
@@ -84,30 +90,40 @@ const invokeRead = async (method, args = []) => {
 };
 
 export const createEntry = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
+
     return invokeWrite("create_item", [
         toSymbol(payload.id),
         new Address(payload.owner).toScVal(),
         nativeToScVal(payload.title || ""),
         nativeToScVal(payload.notes || ""),
         toSymbol(payload.state || "open"),
-        nativeToScVal(BigInt(payload.amount || 0), { type: "i128" }),
-        nativeToScVal(BigInt(payload.updatedAt || 0), { type: "u64" }),
+        toI128(payload.amount),
+        toU64(payload.updatedAt),
     ]);
 };
 
 export const donateEntry = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+
     return invokeWrite("donate_item", [
         toSymbol(payload.id),
         toSymbol(payload.state || "open"),
         nativeToScVal(payload.notes || ""),
-        nativeToScVal(BigInt(payload.updatedAt || 0), { type: "u64" }),
+        toU64(payload.updatedAt),
     ]);
 };
 
 export const withdrawEntry = async (id) => {
+    if (!id) throw new Error("id is required");
     return invokeRead("withdraw_item", [toSymbol(id)]);
 };
 
 export const listIds = async () => {
     return invokeRead("list_ids", []);
+};
+
+export const getCount = async () => {
+    return invokeRead("get_count", []);
 };
