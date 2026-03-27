@@ -1,0 +1,120 @@
+:root {
+    --c1: #C0392B;
+    --c2: #E67E22;
+    --c3: #F1C40F;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: "Century Gothic", "Gill Sans", sans-serif;
+    color: #1c1f24;
+    padding: clamp(1rem, 3vw, 2.5rem);
+}
+
+.app {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: clamp(1rem, 2.2vw, 2rem);
+    border-radius: 29px;
+    background: #ffffff;
+}
+
+.hero {
+    margin-bottom: 1rem;
+}
+
+.kicker {
+    margin: 0;
+    font-size: 0.86rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--c1);
+}
+
+h1 {
+    margin: 0.4rem 0;
+    line-height: 1.15;
+}
+
+.subtitle {
+    margin: 0.3rem 0 1rem;
+    color: #3e4653;
+}
+
+#walletState {
+    margin: 0.5rem 0 0;
+    font-size: 0.9rem;
+}
+
+.panel {
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 14px;
+    padding: 1rem;
+    margin-top: 1rem;
+    background: #ffffff;
+}
+
+label {
+    display: block;
+    margin-bottom: 0.8rem;
+    font-weight: 600;
+}
+
+input,
+textarea {
+    width: 100%;
+    margin-top: 0.35rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    font: inherit;
+    background: #fff;
+}
+
+.actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.6rem;
+    margin-top: 0.6rem;
+}
+
+button {
+    background: linear-gradient(85deg, var(--c1), var(--c2));
+    color: #fff;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 0.65rem 0.8rem;
+    font: inherit;
+    cursor: pointer;
+}
+
+button:hover {
+    filter: brightness(1.05);
+}
+
+.output-panel pre {
+    margin: 0;
+    white-space: pre-wrap;
+    background: rgba(0, 0, 0, 0.035);
+    border-radius: 12px;
+    padding: 0.8rem;
+    min-height: 120px;
+}
+
+body {
+    background-image: linear-gradient(120deg, #f4f4f4 0%, #ffffff 100%);
+}
+.app { border: 2px dashed #C0392B; }
+.panel { border: 2px dotted #E67E22; }
+button { border-radius: 2px; text-transform: uppercase; letter-spacing: 0.06em; }
+
+@media (max-width: 760px) {
+    .actions {
+        grid-template-columns: 1fr;
+    }
+}

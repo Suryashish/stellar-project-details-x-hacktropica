@@ -1,0 +1,119 @@
+:root {
+    --c1: #3498DB;
+    --c2: #2980B9;
+    --c3: #1F618D;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: "Consolas", "Courier New", monospace;
+    color: #1c1f24;
+    padding: clamp(1rem, 3vw, 2.5rem);
+}
+
+.app {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: clamp(1rem, 2.2vw, 2rem);
+    border-radius: 14px;
+    background: #ffffff;
+}
+
+.hero {
+    margin-bottom: 1rem;
+}
+
+.kicker {
+    margin: 0;
+    font-size: 0.86rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--c1);
+}
+
+h1 {
+    margin: 0.4rem 0;
+    line-height: 1.15;
+}
+
+.subtitle {
+    margin: 0.3rem 0 1rem;
+    color: #3e4653;
+}
+
+#walletState {
+    margin: 0.5rem 0 0;
+    font-size: 0.9rem;
+}
+
+.panel {
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 14px;
+    padding: 1rem;
+    margin-top: 1rem;
+    background: #ffffff;
+}
+
+label {
+    display: block;
+    margin-bottom: 0.8rem;
+    font-weight: 600;
+}
+
+input,
+textarea {
+    width: 100%;
+    margin-top: 0.35rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    font: inherit;
+    background: #fff;
+}
+
+.actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.6rem;
+    margin-top: 0.6rem;
+}
+
+button {
+    background: linear-gradient(136deg, var(--c1), var(--c2));
+    color: #fff;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 0.65rem 0.8rem;
+    font: inherit;
+    cursor: pointer;
+}
+
+button:hover {
+    filter: brightness(1.05);
+}
+
+.output-panel pre {
+    margin: 0;
+    white-space: pre-wrap;
+    background: rgba(0, 0, 0, 0.035);
+    border-radius: 12px;
+    padding: 0.8rem;
+    min-height: 120px;
+}
+
+body {
+    background-image: linear-gradient(150deg, #efe8ff 0%, #fff9fb 45%, #e7fff7 100%);
+}
+.app { border-radius: 32px; box-shadow: 0 14px 30px rgba(60, 40, 80, 0.15); }
+button { border-radius: 14px; }
+
+@media (max-width: 760px) {
+    .actions {
+        grid-template-columns: 1fr;
+    }
+}
