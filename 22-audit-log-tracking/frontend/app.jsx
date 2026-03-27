@@ -1,56 +1,36 @@
 import React, { useState } from "react";
-import { checkConnection, recordEntry, queryEntry, verifyEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 22,
-    title: "Audit / Log Tracking System",
-    style: "formal-table",
-    label: "log",
-    writeAction: "record",
-    updateAction: "query",
-    readAction: "verify",
-};
+import { checkConnection, logAction, logAccess, flagEntry, getEntry, listEntries, getEntryCount, getFlaggedCount } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
-
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "log1",
+        actor: "",
+        actionType: "update",
+        target: "user_profile",
+        description: "Modified user settings",
+        severity: "2",
+        timestamp: String(nowTs()),
+        resource: "/api/data",
+        accessType: "read",
+        reason: "Suspicious access pattern",
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
+    const [entryCount, setEntryCount] = useState("-");
+    const [flaggedCount, setFlaggedCount] = useState("-");
 
     const setField = (event) => {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +46,104 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => recordEntry(payload()));
+    const onLogAction = () => runAction(async () =>
+        logAction({
+            id: form.id.trim(),
+            actor: form.actor.trim(),
+            actionType: form.actionType.trim(),
+            target: form.target.trim(),
+            description: form.description.trim(),
+            severity: form.severity.trim(),
+            timestamp: form.timestamp.trim(),
+        })
+    );
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return queryEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onLogAccess = () => runAction(async () =>
+        logAccess({
+            id: form.id.trim(),
+            accessor: form.actor.trim(),
+            resource: form.resource.trim(),
+            accessType: form.accessType.trim(),
+            timestamp: form.timestamp.trim(),
+        })
+    );
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return verifyEntry(next.id);
-    });
+    const onFlagEntry = () => runAction(async () =>
+        flagEntry({
+            id: form.id.trim(),
+            auditor: form.actor.trim(),
+            reason: form.reason.trim(),
+        })
+    );
 
-    const onList = () => runAction(async () => listIds());
+    const onGetEntry = () => runAction(async () => getEntry(form.id.trim()));
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
-        return { count: value };
+    const onListEntries = () => runAction(async () => listEntries());
+
+    const onGetCounts = () => runAction(async () => {
+        const total = await getEntryCount();
+        const flagged = await getFlaggedCount();
+        setEntryCount(String(total));
+        setFlaggedCount(String(flagged));
+        return { totalEntries: total, flaggedEntries: flagged };
     });
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 22</p>
+                <h1>Audit / Log Tracking System</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Log actions, track access, flag suspicious entries, and query the audit trail.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total entries: {entryCount} | Flagged: {flaggedCount}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="id">Entry ID (Symbol)</label>
+                <input id="id" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="actor">Actor / Auditor Address</label>
+                <input id="actor" name="actor" value={form.actor} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="actionType">Action Type (Symbol)</label>
+                <input id="actionType" name="actionType" value={form.actionType} onChange={setField} placeholder="update/delete/create" />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="target">Target</label>
+                <input id="target" name="target" value={form.target} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="description">Description</label>
+                <input id="description" name="description" value={form.description} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="severity">Severity (0-5)</label>
+                <input id="severity" name="severity" value={form.severity} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="timestamp">Timestamp (u64)</label>
+                <input id="timestamp" name="timestamp" value={form.timestamp} onChange={setField} type="number" />
+
+                <label htmlFor="resource">Resource (for access log)</label>
+                <input id="resource" name="resource" value={form.resource} onChange={setField} />
+
+                <label htmlFor="accessType">Access Type (Symbol)</label>
+                <input id="accessType" name="accessType" value={form.accessType} onChange={setField} placeholder="read/write/delete" />
+
+                <label htmlFor="reason">Flag Reason</label>
+                <input id="reason" name="reason" value={form.reason} onChange={setField} />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onLogAction} disabled={isBusy}>Log Action</button>
+                    <button type="button" onClick={onLogAccess} disabled={isBusy}>Log Access</button>
+                    <button type="button" onClick={onFlagEntry} disabled={isBusy}>Flag Entry</button>
+                    <button type="button" onClick={onGetEntry} disabled={isBusy}>Get Entry</button>
+                    <button type="button" onClick={onListEntries} disabled={isBusy}>List Entries</button>
+                    <button type="button" onClick={onGetCounts} disabled={isBusy}>Get Counts</button>
                 </div>
             </section>
 

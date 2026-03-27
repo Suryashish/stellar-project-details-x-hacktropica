@@ -10,7 +10,6 @@ const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
-const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +88,65 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const postEntry = async (payload) => {
+export const postJob = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.employer) throw new Error("employer address is required");
 
-    return invokeWrite("post_item", [
+    return invokeWrite("post_job", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
+        new Address(payload.employer).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.description || ""),
+        nativeToScVal(payload.location || ""),
+        toI128(payload.salaryMin),
+        toI128(payload.salaryMax),
+        toSymbol(payload.jobType || "fulltime"),
     ]);
 };
 
-export const applyEntry = async (payload) => {
+export const applyJob = async (payload) => {
+    if (!payload?.jobId) throw new Error("jobId is required");
+    if (!payload?.applicant) throw new Error("applicant address is required");
+
+    return invokeWrite("apply_job", [
+        toSymbol(payload.jobId),
+        new Address(payload.applicant).toScVal(),
+        nativeToScVal(payload.coverLetter || ""),
+    ]);
+};
+
+export const closeJob = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.employer) throw new Error("employer address is required");
 
-    return invokeWrite("apply_item", [
+    return invokeWrite("close_job", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.employer).toScVal(),
     ]);
 };
 
-export const hireEntry = async (id) => {
+export const hireApplicant = async (payload) => {
+    if (!payload?.jobId) throw new Error("jobId is required");
+    if (!payload?.employer) throw new Error("employer address is required");
+    if (!payload?.applicant) throw new Error("applicant address is required");
+
+    return invokeWrite("hire_applicant", [
+        toSymbol(payload.jobId),
+        new Address(payload.employer).toScVal(),
+        new Address(payload.applicant).toScVal(),
+    ]);
+};
+
+export const getJob = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("hire_item", [toSymbol(id)]);
+    return invokeRead("get_job", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listJobs = async () => {
+    return invokeRead("list_jobs", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getApplicationCount = async (jobId) => {
+    if (!jobId) throw new Error("jobId is required");
+    return invokeRead("get_application_count", [toSymbol(jobId)]);
 };

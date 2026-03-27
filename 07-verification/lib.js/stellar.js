@@ -89,41 +89,55 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const registerEntry = async (payload) => {
+export const submitCredential = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.holder) throw new Error("holder address is required");
 
-    return invokeWrite("register_item", [
+    return invokeWrite("submit_credential", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        new Address(payload.holder).toScVal(),
+        toSymbol(payload.credentialType || "certificate"),
+        nativeToScVal(payload.issuerName || ""),
+        nativeToScVal(payload.dataHash || ""),
+        toU64(payload.issuedAt),
+        toU64(payload.expiresAt),
     ]);
 };
 
-export const validateEntry = async (payload) => {
+export const verifyCredential = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.verifier) throw new Error("verifier address is required");
 
-    return invokeWrite("validate_item", [
+    return invokeWrite("verify_credential", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.verifier).toScVal(),
     ]);
 };
 
-export const approveEntry = async (id) => {
+export const revokeCredential = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.holder) throw new Error("holder address is required");
+
+    return invokeWrite("revoke_credential", [
+        toSymbol(payload.id),
+        new Address(payload.holder).toScVal(),
+    ]);
+};
+
+export const checkValidity = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("approve_item", [toSymbol(id)]);
+    return invokeRead("check_validity", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const getCredential = async (id) => {
+    if (!id) throw new Error("id is required");
+    return invokeRead("get_credential", [toSymbol(id)]);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const listCredentials = async () => {
+    return invokeRead("list_credentials", []);
+};
+
+export const getCredentialCount = async () => {
+    return invokeRead("get_credential_count", []);
 };

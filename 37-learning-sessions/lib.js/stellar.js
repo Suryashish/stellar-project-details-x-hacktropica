@@ -11,6 +11,7 @@ const server = new rpc.Server(RPC_URL);
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +90,75 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const bookEntry = async (payload) => {
+export const createSession = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.tutor) throw new Error("tutor address is required");
 
-    return invokeWrite("book_item", [
+    return invokeWrite("create_session", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        new Address(payload.tutor).toScVal(),
+        nativeToScVal(payload.subject || ""),
+        nativeToScVal(payload.description || ""),
+        toU64(payload.sessionDate),
+        toU32(payload.durationMins),
+        toI128(payload.price),
+        toU32(payload.maxAttendees),
     ]);
 };
 
-export const attendEntry = async (payload) => {
-    if (!payload?.id) throw new Error("id is required");
+export const bookSession = async (sessionId, student, paymentAmount) => {
+    if (!sessionId) throw new Error("sessionId is required");
+    if (!student) throw new Error("student address is required");
 
-    return invokeWrite("attend_item", [
-        toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+    return invokeWrite("book_session", [
+        toSymbol(sessionId),
+        new Address(student).toScVal(),
+        toI128(paymentAmount),
     ]);
 };
 
-export const rateEntry = async (id) => {
+export const startSession = async (id, tutor) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("rate_item", [toSymbol(id)]);
+    if (!tutor) throw new Error("tutor address is required");
+    return invokeWrite("start_session", [
+        toSymbol(id),
+        new Address(tutor).toScVal(),
+    ]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const completeSession = async (id, tutor) => {
+    if (!id) throw new Error("id is required");
+    if (!tutor) throw new Error("tutor address is required");
+    return invokeWrite("complete_session", [
+        toSymbol(id),
+        new Address(tutor).toScVal(),
+    ]);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const cancelSession = async (id, tutor) => {
+    if (!id) throw new Error("id is required");
+    if (!tutor) throw new Error("tutor address is required");
+    return invokeWrite("cancel_session", [
+        toSymbol(id),
+        new Address(tutor).toScVal(),
+    ]);
+};
+
+export const rateSession = async (id, student, rating) => {
+    if (!id) throw new Error("id is required");
+    if (!student) throw new Error("student address is required");
+    return invokeWrite("rate_session", [
+        toSymbol(id),
+        new Address(student).toScVal(),
+        toU32(rating),
+    ]);
+};
+
+export const getSession = async (id) => {
+    if (!id) throw new Error("id is required");
+    return invokeRead("get_session", [toSymbol(id)]);
+};
+
+export const listSessions = async () => {
+    return invokeRead("list_sessions", []);
 };

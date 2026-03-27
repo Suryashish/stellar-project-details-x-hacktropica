@@ -1,32 +1,22 @@
 import React, { useState } from "react";
-import { checkConnection, addEntry, checkEntry, reserveEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 2,
-    title: "Resource Availability System",
-    style: "card-based",
-    label: "resource",
-    writeAction: "add",
-    updateAction: "check",
-    readAction: "reserve",
-};
+import { checkConnection, registerResource, reserveResource, releaseResource, checkAvailability, getResource, listResources, getCount } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
 const initialForm = () => ({
-    id: `${meta.label}1`,
+    id: "res1",
     owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
+    name: "Conference Room A",
+    resourceType: "room",
+    capacity: "10",
+    location: "Building 1, Floor 2",
+    reserver: "",
+    startTime: String(nowTs()),
+    endTime: String(nowTs() + 3600),
 });
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
@@ -42,16 +32,6 @@ export default function App() {
         setForm((prev) => ({ ...prev, [name]: value }));
     };
 
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
-
     const runAction = async (action) => {
         setIsBusy(true);
         try {
@@ -66,29 +46,40 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => addEntry(payload()));
+    const onRegister = () => runAction(async () => registerResource({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        name: form.name.trim(),
+        resourceType: form.resourceType.trim(),
+        capacity: form.capacity.trim(),
+        location: form.location.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return checkEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
+    const onReserve = () => runAction(async () => reserveResource({
+        id: form.id.trim(),
+        reserver: form.reserver.trim() || form.owner.trim(),
+        startTime: Number(form.startTime || nowTs()),
+        endTime: Number(form.endTime || nowTs() + 3600),
+    }));
+
+    const onRelease = () => runAction(async () => releaseResource({
+        id: form.id.trim(),
+        reserver: form.reserver.trim() || form.owner.trim(),
+    }));
+
+    const onCheckAvailability = () => runAction(async () => {
+        const available = await checkAvailability(form.id.trim());
+        return { resourceId: form.id.trim(), available };
     });
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return reserveEntry(next.id);
-    });
+    const onGetResource = () => runAction(async () => getResource(form.id.trim()));
 
-    const onList = () => runAction(async () => listIds());
+    const onList = () => runAction(async () => listResources());
 
     const onCount = () => runAction(async () => {
         const value = await getCount();
@@ -99,44 +90,61 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 2</p>
+                <h1>Resource Availability System</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Register resources, make reservations with time slots, check availability, and release reservations.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Registered resources: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
+                <h2>Register Resource</h2>
+
+                <label htmlFor="entryId">Resource ID (Symbol)</label>
                 <input id="entryId" name="id" value={form.id} onChange={setField} />
 
                 <label htmlFor="owner">Owner Address</label>
                 <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="name">Resource Name</label>
+                <input id="name" name="name" value={form.name} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="resourceType">Resource Type (Symbol)</label>
+                <input id="resourceType" name="resourceType" value={form.resourceType} onChange={setField} placeholder="room, vehicle, equipment..." />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="capacity">Capacity</label>
+                <input id="capacity" name="capacity" value={form.capacity} onChange={setField} type="number" />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
-
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="location">Location</label>
+                <input id="location" name="location" value={form.location} onChange={setField} />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onRegister} disabled={isBusy}>Register Resource</button>
+                    <button type="button" onClick={onGetResource} disabled={isBusy}>Get Resource</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List All Resources</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Reservation Management</h2>
+
+                <label htmlFor="reserver">Reserver Address</label>
+                <input id="reserver" name="reserver" value={form.reserver} onChange={setField} placeholder="G... (defaults to owner)" />
+
+                <label htmlFor="startTime">Start Time (u64 timestamp)</label>
+                <input id="startTime" name="startTime" value={form.startTime} onChange={setField} type="number" />
+
+                <label htmlFor="endTime">End Time (u64 timestamp)</label>
+                <input id="endTime" name="endTime" value={form.endTime} onChange={setField} type="number" />
+
+                <div className="actions">
+                    <button type="button" onClick={onReserve} disabled={isBusy}>Reserve Resource</button>
+                    <button type="button" onClick={onRelease} disabled={isBusy}>Release Resource</button>
+                    <button type="button" onClick={onCheckAvailability} disabled={isBusy}>Check Availability</button>
                 </div>
             </section>
 

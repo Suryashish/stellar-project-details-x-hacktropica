@@ -1,32 +1,20 @@
 import React, { useState } from "react";
-import { checkConnection, postEntry, browseEntry, removeEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 3,
-    title: "Public Notice Board",
-    style: "bulletin",
-    label: "notice",
-    writeAction: "post",
-    updateAction: "browse",
-    readAction: "remove",
-};
+import { checkConnection, postNotice, editNotice, removeNotice, pinNotice, getNotice, listNotices, getNoticeCount } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
 const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
+    id: "notice1",
+    author: "",
+    title: "Important Announcement",
+    content: "This is a public notice posted on the blockchain.",
+    category: "general",
+    priority: "1",
+    expiresAt: String(nowTs() + 86400 * 7),
 });
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
@@ -42,16 +30,6 @@ export default function App() {
         setForm((prev) => ({ ...prev, [name]: value }));
     };
 
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
-
     const runAction = async (action) => {
         setIsBusy(true);
         try {
@@ -66,32 +44,46 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => postEntry(payload()));
+    const onPost = () => runAction(async () => postNotice({
+        id: form.id.trim(),
+        author: form.author.trim(),
+        title: form.title.trim(),
+        content: form.content.trim(),
+        category: form.category.trim(),
+        priority: form.priority.trim(),
+        expiresAt: Number(form.expiresAt || nowTs() + 86400),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return browseEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onEdit = () => runAction(async () => editNotice({
+        id: form.id.trim(),
+        author: form.author.trim(),
+        title: form.title.trim(),
+        content: form.content.trim(),
+        category: form.category.trim(),
+        priority: form.priority.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return removeEntry(next.id);
-    });
+    const onRemove = () => runAction(async () => removeNotice({
+        id: form.id.trim(),
+        author: form.author.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onPin = () => runAction(async () => pinNotice({
+        id: form.id.trim(),
+        author: form.author.trim(),
+    }));
+
+    const onGet = () => runAction(async () => getNotice(form.id.trim()));
+
+    const onList = () => runAction(async () => listNotices());
 
     const onCount = () => runAction(async () => {
-        const value = await getCount();
+        const value = await getNoticeCount();
         setCountValue(String(value));
         return { count: value };
     });
@@ -99,44 +91,48 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 3</p>
+                <h1>Public Notice Board</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Post announcements, pin important notices, edit content, and manage a decentralized bulletin board.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total notices: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
+                <h2>Notice Details</h2>
+
+                <label htmlFor="entryId">Notice ID (Symbol, &lt;= 32 chars)</label>
                 <input id="entryId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="author">Author Address</label>
+                <input id="author" name="author" value={form.author} onChange={setField} placeholder="G..." />
 
                 <label htmlFor="title">Title</label>
                 <input id="title" name="title" value={form.title} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="content">Content</label>
+                <textarea id="content" name="content" rows="5" value={form.content} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} placeholder="general, urgent, event..." />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="priority">Priority (0 = low, 1 = normal, 2 = high, 3 = critical)</label>
+                <input id="priority" name="priority" value={form.priority} onChange={setField} type="number" min="0" max="3" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="expiresAt">Expires At (u64 timestamp)</label>
+                <input id="expiresAt" name="expiresAt" value={form.expiresAt} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onPost} disabled={isBusy}>Post Notice</button>
+                    <button type="button" onClick={onEdit} disabled={isBusy}>Edit Notice</button>
+                    <button type="button" onClick={onPin} disabled={isBusy}>Pin / Unpin</button>
+                    <button type="button" onClick={onRemove} disabled={isBusy}>Remove Notice</button>
+                    <button type="button" onClick={onGet} disabled={isBusy}>Get Notice</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List All Notices</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
                 </div>
             </section>
 

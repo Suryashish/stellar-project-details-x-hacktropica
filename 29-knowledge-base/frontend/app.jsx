@@ -1,37 +1,23 @@
 import React, { useState } from "react";
-import { checkConnection, publishEntry, searchEntry, rateEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 29,
-    title: "Knowledge Base",
-    style: "search-first",
-    label: "article",
-    writeAction: "publish",
-    updateAction: "search",
-    readAction: "rate",
-};
-
-const nowTs = () => Math.floor(Date.now() / 1000);
-
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
+import { checkConnection, createArticle, editArticle, upvoteArticle, markAnswer, archiveArticle, getArticle, listArticles, getArticleCount } from "../lib.js/stellar.js";
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "article1",
+        author: "",
+        title: "Getting Started with Soroban",
+        content: "Soroban is a smart contracts platform...",
+        category: "tutorial",
+        tags: "soroban,stellar,rust",
+        editor: "",
+        newContent: "",
+        voter: "",
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
@@ -41,16 +27,6 @@ export default function App() {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -71,27 +47,42 @@ export default function App() {
         return nextWalletState;
     });
 
-    const onWrite = () => runAction(async () => publishEntry(payload()));
+    const onCreateArticle = () => runAction(async () => createArticle({
+        id: form.id.trim(),
+        author: form.author.trim(),
+        title: form.title.trim(),
+        content: form.content.trim(),
+        category: form.category.trim(),
+        tags: form.tags.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return searchEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onEditArticle = () => runAction(async () => editArticle({
+        id: form.id.trim(),
+        editor: form.editor.trim() || form.author.trim(),
+        newContent: form.newContent.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return rateEntry(next.id);
-    });
+    const onUpvote = () => runAction(async () => upvoteArticle({
+        id: form.id.trim(),
+        voter: form.voter.trim() || form.author.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onMarkAnswer = () => runAction(async () => markAnswer({
+        id: form.id.trim(),
+        author: form.author.trim(),
+    }));
+
+    const onArchive = () => runAction(async () => archiveArticle({
+        id: form.id.trim(),
+        author: form.author.trim(),
+    }));
+
+    const onGetArticle = () => runAction(async () => getArticle(form.id.trim()));
+
+    const onList = () => runAction(async () => listArticles());
 
     const onCount = () => runAction(async () => {
-        const value = await getCount();
+        const value = await getArticleCount();
         setCountValue(String(value));
         return { count: value };
     });
@@ -99,44 +90,64 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
-                <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
-                </p>
+                <p className="kicker">Stellar Soroban Project 29</p>
+                <h1>Knowledge Base</h1>
+                <p className="subtitle">Create articles, edit content, upvote, mark answers, and archive.</p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Article count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <h2>Create Article</h2>
+                <label htmlFor="id">Article ID (Symbol)</label>
+                <input id="id" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="author">Author Address</label>
+                <input id="author" name="author" value={form.author} onChange={setField} placeholder="G..." />
 
                 <label htmlFor="title">Title</label>
                 <input id="title" name="title" value={form.title} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="content">Content</label>
+                <textarea id="content" name="content" rows="4" value={form.content} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
-
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="tags">Tags (comma-separated)</label>
+                <input id="tags" name="tags" value={form.tags} onChange={setField} />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateArticle} disabled={isBusy}>Create Article</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Edit / Interact</h2>
+                <label htmlFor="editor">Editor Address (optional, defaults to author)</label>
+                <input id="editor" name="editor" value={form.editor} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="newContent">New Content (for editing)</label>
+                <textarea id="newContent" name="newContent" rows="3" value={form.newContent} onChange={setField} />
+
+                <label htmlFor="voter">Voter Address (optional, defaults to author)</label>
+                <input id="voter" name="voter" value={form.voter} onChange={setField} placeholder="G..." />
+
+                <div className="actions">
+                    <button type="button" onClick={onEditArticle} disabled={isBusy}>Edit Article</button>
+                    <button type="button" onClick={onUpvote} disabled={isBusy}>Upvote</button>
+                    <button type="button" onClick={onMarkAnswer} disabled={isBusy}>Mark as Answer</button>
+                    <button type="button" onClick={onArchive} disabled={isBusy}>Archive</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Read Operations</h2>
+                <div className="actions">
+                    <button type="button" onClick={onGetArticle} disabled={isBusy}>Get Article</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List Articles</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
                 </div>
             </section>
 

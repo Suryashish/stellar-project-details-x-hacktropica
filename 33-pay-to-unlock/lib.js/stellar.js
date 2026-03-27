@@ -10,7 +10,6 @@ const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
-const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +88,70 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const listEntry = async (payload) => {
+export const createContent = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.creator) throw new Error("creator address is required");
 
-    return invokeWrite("list_item", [
+    return invokeWrite("create_content", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
+        new Address(payload.creator).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.preview || ""),
+        nativeToScVal(payload.contentHash || ""),
+        toI128(payload.price),
     ]);
 };
 
-export const purchaseEntry = async (payload) => {
+export const purchaseContent = async (payload) => {
+    if (!payload?.contentId) throw new Error("contentId is required");
+    if (!payload?.buyer) throw new Error("buyer address is required");
+
+    return invokeWrite("purchase_content", [
+        toSymbol(payload.contentId),
+        new Address(payload.buyer).toScVal(),
+        toI128(payload.paymentAmount),
+    ]);
+};
+
+export const hasAccess = async (contentId, user) => {
+    if (!contentId) throw new Error("contentId is required");
+    if (!user) throw new Error("user address is required");
+    return invokeRead("has_access", [
+        toSymbol(contentId),
+        new Address(user).toScVal(),
+    ]);
+};
+
+export const updatePrice = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.creator) throw new Error("creator address is required");
 
-    return invokeWrite("purchase_item", [
+    return invokeWrite("update_price", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.creator).toScVal(),
+        toI128(payload.newPrice),
     ]);
 };
 
-export const unlockEntry = async (id) => {
+export const withdrawEarnings = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.creator) throw new Error("creator address is required");
+
+    return invokeWrite("withdraw_earnings", [
+        toSymbol(payload.id),
+        new Address(payload.creator).toScVal(),
+    ]);
+};
+
+export const getContent = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("unlock_item", [toSymbol(id)]);
+    return invokeRead("get_content", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listContent = async () => {
+    return invokeRead("list_content", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getContentCount = async () => {
+    return invokeRead("get_content_count", []);
 };

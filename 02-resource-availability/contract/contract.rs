@@ -7,29 +7,38 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct ResourceAvailabilityContractItem {
+pub struct Resource {
     pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+    pub name: String,
+    pub resource_type: Symbol,
+    pub capacity: u32,
+    pub location: String,
+    pub reserved_by: Address,
+    pub has_reservation: bool,
+    pub reserved_start: u64,
+    pub reserved_end: u64,
+    pub is_available: bool,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum ResourceAvailabilityContractDataKey {
+pub enum ResourceDataKey {
     IdList,
-    Item(Symbol),
+    Resource(Symbol),
     Count,
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum ResourceAvailabilityContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum ResourceError {
+    InvalidName = 1,
+    NotFound = 2,
+    AlreadyExists = 3,
+    NotAvailable = 4,
+    Unauthorized = 5,
+    NoReservation = 6,
+    InvalidTimeRange = 7,
 }
 
 #[contract]
@@ -37,39 +46,8 @@ pub struct ResourceAvailabilityContract;
 
 #[contractimpl]
 impl ResourceAvailabilityContract {
-    fn count_key() -> ResourceAvailabilityContractDataKey {
-        ResourceAvailabilityContractDataKey::Count
-    }
-
-    fn ids_key() -> ResourceAvailabilityContractDataKey {
-        ResourceAvailabilityContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> ResourceAvailabilityContractDataKey {
-        ResourceAvailabilityContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, ResourceAvailabilityContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, ResourceAvailabilityContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
-    fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
-    }
-
-    fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+    fn resource_key(id: &Symbol) -> ResourceDataKey {
+        ResourceDataKey::Resource(id.clone())
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +59,135 @@ impl ResourceAvailabilityContract {
         false
     }
 
-    pub fn add_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    fn load_ids(env: &Env) -> Vec<Symbol> {
+        env.storage().instance().get(&ResourceDataKey::IdList).unwrap_or(Vec::new(env))
+    }
 
-        let item = ResourceAvailabilityContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+    fn save_ids(env: &Env, ids: &Vec<Symbol>) {
+        env.storage().instance().set(&ResourceDataKey::IdList, ids);
+    }
+
+    pub fn register_resource(
+        env: Env,
+        id: Symbol,
+        owner: Address,
+        name: String,
+        resource_type: Symbol,
+        capacity: u32,
+        location: String,
+    ) {
+        owner.require_auth();
+
+        if name.len() == 0 {
+            panic_with_error!(&env, ResourceError::InvalidName);
+        }
+
+        let key = Self::resource_key(&id);
+        if env.storage().instance().has(&key) {
+            panic_with_error!(&env, ResourceError::AlreadyExists);
+        }
+
+        let resource = Resource {
+            owner: owner.clone(),
+            name,
+            resource_type,
+            capacity,
+            location,
+            reserved_by: owner,
+            has_reservation: false,
+            reserved_start: 0,
+            reserved_end: 0,
+            is_available: true,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &resource);
 
         let mut ids = Self::load_ids(&env);
-        if !Self::has_id(&ids, &id) {
-            ids.push_back(id);
-            Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
+        ids.push_back(id);
+        Self::save_ids(&env, &ids);
+
+        let count: u32 = env.storage().instance().get(&ResourceDataKey::Count).unwrap_or(0);
+        env.storage().instance().set(&ResourceDataKey::Count, &(count + 1));
+    }
+
+    pub fn reserve_resource(
+        env: Env,
+        id: Symbol,
+        reserver: Address,
+        start_time: u64,
+        end_time: u64,
+    ) {
+        reserver.require_auth();
+
+        if start_time >= end_time {
+            panic_with_error!(&env, ResourceError::InvalidTimeRange);
+        }
+
+        let key = Self::resource_key(&id);
+        let maybe: Option<Resource> = env.storage().instance().get(&key);
+
+        if let Some(mut resource) = maybe {
+            if !resource.is_available {
+                panic_with_error!(&env, ResourceError::NotAvailable);
             }
+
+            resource.reserved_by = reserver;
+            resource.has_reservation = true;
+            resource.reserved_start = start_time;
+            resource.reserved_end = end_time;
+            resource.is_available = false;
+
+            env.storage().instance().set(&key, &resource);
+        } else {
+            panic_with_error!(&env, ResourceError::NotFound);
         }
     }
 
-    pub fn check_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<ResourceAvailabilityContractItem> = env.storage().instance().get(&key);
+    pub fn release_resource(env: Env, id: Symbol, reserver: Address) {
+        reserver.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+        let key = Self::resource_key(&id);
+        let maybe: Option<Resource> = env.storage().instance().get(&key);
+
+        if let Some(mut resource) = maybe {
+            if !resource.has_reservation {
+                panic_with_error!(&env, ResourceError::NoReservation);
+            }
+            if resource.reserved_by != reserver {
+                panic_with_error!(&env, ResourceError::Unauthorized);
+            }
+
+            resource.has_reservation = false;
+            resource.reserved_start = 0;
+            resource.reserved_end = 0;
+            resource.is_available = true;
+
+            env.storage().instance().set(&key, &resource);
+        } else {
+            panic_with_error!(&env, ResourceError::NotFound);
+        }
+    }
+
+    pub fn check_availability(env: Env, id: Symbol) -> bool {
+        let key = Self::resource_key(&id);
+        let maybe: Option<Resource> = env.storage().instance().get(&key);
+
+        if let Some(resource) = maybe {
+            resource.is_available
         } else {
             false
         }
     }
 
-    pub fn reserve_item(env: Env, id: Symbol) -> Option<ResourceAvailabilityContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn get_resource(env: Env, id: Symbol) -> Option<Resource> {
+        env.storage().instance().get(&Self::resource_key(&id))
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn list_resources(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
     pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+        env.storage().instance().get(&ResourceDataKey::Count).unwrap_or(0)
     }
 }

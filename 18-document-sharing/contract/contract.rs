@@ -7,29 +7,38 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct DocumentSharingContractItem {
+pub struct Document {
     pub owner: Address,
     pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
+    pub doc_hash: String,
+    pub doc_type: Symbol,
+    pub file_size: u32,
+    pub version: u32,
+    pub share_count: u32,
+    pub is_public: bool,
+    pub uploaded_at: u64,
     pub updated_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum DocumentSharingContractDataKey {
+pub enum DataKey {
     IdList,
-    Item(Symbol),
+    Doc(Symbol),
+    Access(Symbol, Address),
     Count,
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum DocumentSharingContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum DocError {
+    NotFound = 1,
+    NotOwner = 2,
+    AlreadyExists = 3,
+    InvalidTitle = 4,
+    InvalidHash = 5,
+    InvalidSize = 6,
 }
 
 #[contract]
@@ -37,39 +46,12 @@ pub struct DocumentSharingContract;
 
 #[contractimpl]
 impl DocumentSharingContract {
-    fn count_key() -> DocumentSharingContractDataKey {
-        DocumentSharingContractDataKey::Count
-    }
-
-    fn ids_key() -> DocumentSharingContractDataKey {
-        DocumentSharingContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> DocumentSharingContractDataKey {
-        DocumentSharingContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, DocumentSharingContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, DocumentSharingContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage().instance().get(&DataKey::IdList).unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&DataKey::IdList, ids);
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +63,134 @@ impl DocumentSharingContract {
         false
     }
 
-    pub fn upload_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
+    pub fn upload_doc(
+        env: Env,
+        id: Symbol,
+        owner: Address,
+        title: String,
+        doc_hash: String,
+        doc_type: Symbol,
+        file_size: u32,
+    ) {
         owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
 
-        let item = DocumentSharingContractItem {
+        if title.len() == 0 {
+            panic_with_error!(&env, DocError::InvalidTitle);
+        }
+        if doc_hash.len() == 0 {
+            panic_with_error!(&env, DocError::InvalidHash);
+        }
+        if file_size == 0 {
+            panic_with_error!(&env, DocError::InvalidSize);
+        }
+
+        let key = DataKey::Doc(id.clone());
+        if env.storage().instance().has(&key) {
+            panic_with_error!(&env, DocError::AlreadyExists);
+        }
+
+        let now = env.ledger().timestamp();
+        let doc = Document {
             owner,
             title,
-            notes,
-            state,
-            amount,
-            updated_at,
+            doc_hash,
+            doc_type,
+            file_size,
+            version: 1,
+            share_count: 0,
+            is_public: false,
+            uploaded_at: now,
+            updated_at: now,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
+        env.storage().instance().set(&key, &doc);
 
-        env.storage().instance().set(&key, &item);
+        let count: u32 = env.storage().instance().get(&DataKey::Count).unwrap_or(0);
+        env.storage().instance().set(&DataKey::Count, &(count + 1));
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
+        }
+    }
+
+    pub fn share_doc(env: Env, id: Symbol, owner: Address, shared_with: Address) {
+        owner.require_auth();
+
+        let key = DataKey::Doc(id.clone());
+        let maybe: Option<Document> = env.storage().instance().get(&key);
+
+        if let Some(mut doc) = maybe {
+            if doc.owner != owner {
+                panic_with_error!(&env, DocError::NotOwner);
             }
-        }
-    }
-
-    pub fn share_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<DocumentSharingContractItem> = env.storage().instance().get(&key);
-
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+            let access_key = DataKey::Access(id, shared_with);
+            env.storage().instance().set(&access_key, &true);
+            doc.share_count += 1;
+            env.storage().instance().set(&key, &doc);
         } else {
-            false
+            panic_with_error!(&env, DocError::NotFound);
         }
     }
 
-    pub fn download_item(env: Env, id: Symbol) -> Option<DocumentSharingContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn revoke_access(env: Env, id: Symbol, owner: Address, revoked_from: Address) {
+        owner.require_auth();
+
+        let key = DataKey::Doc(id.clone());
+        let maybe: Option<Document> = env.storage().instance().get(&key);
+
+        if let Some(mut doc) = maybe {
+            if doc.owner != owner {
+                panic_with_error!(&env, DocError::NotOwner);
+            }
+            let access_key = DataKey::Access(id, revoked_from);
+            env.storage().instance().set(&access_key, &false);
+            if doc.share_count > 0 {
+                doc.share_count -= 1;
+            }
+            env.storage().instance().set(&key, &doc);
+        } else {
+            panic_with_error!(&env, DocError::NotFound);
+        }
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn update_doc(env: Env, id: Symbol, owner: Address, new_hash: String, new_size: u32) {
+        owner.require_auth();
+
+        if new_hash.len() == 0 {
+            panic_with_error!(&env, DocError::InvalidHash);
+        }
+        if new_size == 0 {
+            panic_with_error!(&env, DocError::InvalidSize);
+        }
+
+        let key = DataKey::Doc(id.clone());
+        let maybe: Option<Document> = env.storage().instance().get(&key);
+
+        if let Some(mut doc) = maybe {
+            if doc.owner != owner {
+                panic_with_error!(&env, DocError::NotOwner);
+            }
+            doc.doc_hash = new_hash;
+            doc.file_size = new_size;
+            doc.version += 1;
+            doc.updated_at = env.ledger().timestamp();
+            env.storage().instance().set(&key, &doc);
+        } else {
+            panic_with_error!(&env, DocError::NotFound);
+        }
+    }
+
+    pub fn get_doc(env: Env, id: Symbol) -> Option<Document> {
+        env.storage().instance().get(&DataKey::Doc(id))
+    }
+
+    pub fn list_docs(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_doc_count(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::Count).unwrap_or(0)
     }
 }

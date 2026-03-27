@@ -7,29 +7,38 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct BookingReservationContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct Slot {
+    pub provider: Address,
+    pub customer: Address,
+    pub is_booked: bool,
+    pub service_name: String,
+    pub date: u64,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub price: i128,
+    pub status: Symbol,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum BookingReservationContractDataKey {
+pub enum SlotDataKey {
     IdList,
-    Item(Symbol),
+    Slot(Symbol),
     Count,
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum BookingReservationContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum SlotError {
+    InvalidServiceName = 1,
+    InvalidTimeRange = 2,
+    NotFound = 3,
+    AlreadyExists = 4,
+    AlreadyBooked = 5,
+    NotBooked = 6,
+    Unauthorized = 7,
+    InvalidStatus = 8,
 }
 
 #[contract]
@@ -37,104 +46,144 @@ pub struct BookingReservationContract;
 
 #[contractimpl]
 impl BookingReservationContract {
-    fn count_key() -> BookingReservationContractDataKey {
-        BookingReservationContractDataKey::Count
-    }
-
-    fn ids_key() -> BookingReservationContractDataKey {
-        BookingReservationContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> BookingReservationContractDataKey {
-        BookingReservationContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, BookingReservationContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, BookingReservationContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn slot_key(id: &Symbol) -> SlotDataKey {
+        SlotDataKey::Slot(id.clone())
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage().instance().get(&SlotDataKey::IdList).unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&SlotDataKey::IdList, ids);
     }
 
-    fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
-        for current in ids.iter() {
-            if current == id.clone() {
-                return true;
-            }
+    pub fn create_slot(
+        env: Env,
+        id: Symbol,
+        provider: Address,
+        service_name: String,
+        date: u64,
+        start_time: u64,
+        end_time: u64,
+        price: i128,
+    ) {
+        provider.require_auth();
+
+        if service_name.len() == 0 {
+            panic_with_error!(&env, SlotError::InvalidServiceName);
         }
-        false
-    }
+        if start_time >= end_time {
+            panic_with_error!(&env, SlotError::InvalidTimeRange);
+        }
 
-    pub fn book_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+        let key = Self::slot_key(&id);
+        if env.storage().instance().has(&key) {
+            panic_with_error!(&env, SlotError::AlreadyExists);
+        }
 
-        let item = BookingReservationContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+        let available = Symbol::new(&env, "available");
+
+        let slot = Slot {
+            provider: provider.clone(),
+            customer: provider,
+            is_booked: false,
+            service_name,
+            date,
+            start_time,
+            end_time,
+            price,
+            status: available,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &slot);
 
         let mut ids = Self::load_ids(&env);
-        if !Self::has_id(&ids, &id) {
-            ids.push_back(id);
-            Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
+        ids.push_back(id);
+        Self::save_ids(&env, &ids);
+
+        let count: u32 = env.storage().instance().get(&SlotDataKey::Count).unwrap_or(0);
+        env.storage().instance().set(&SlotDataKey::Count, &(count + 1));
+    }
+
+    pub fn book_slot(env: Env, id: Symbol, customer: Address) {
+        customer.require_auth();
+
+        let key = Self::slot_key(&id);
+        let maybe: Option<Slot> = env.storage().instance().get(&key);
+
+        if let Some(mut slot) = maybe {
+            if slot.is_booked {
+                panic_with_error!(&env, SlotError::AlreadyBooked);
             }
-        }
-    }
 
-    pub fn confirm_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<BookingReservationContractItem> = env.storage().instance().get(&key);
+            let booked = Symbol::new(&env, "booked");
+            slot.customer = customer;
+            slot.is_booked = true;
+            slot.status = booked;
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+            env.storage().instance().set(&key, &slot);
         } else {
-            false
+            panic_with_error!(&env, SlotError::NotFound);
         }
     }
 
-    pub fn cancel_item(env: Env, id: Symbol) -> Option<BookingReservationContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn cancel_booking(env: Env, id: Symbol, caller: Address) {
+        caller.require_auth();
+
+        let key = Self::slot_key(&id);
+        let maybe: Option<Slot> = env.storage().instance().get(&key);
+
+        if let Some(mut slot) = maybe {
+            if !slot.is_booked {
+                panic_with_error!(&env, SlotError::NotBooked);
+            }
+            if slot.provider != caller && slot.customer != caller {
+                panic_with_error!(&env, SlotError::Unauthorized);
+            }
+
+            let cancelled = Symbol::new(&env, "cancelled");
+            slot.is_booked = false;
+            slot.status = cancelled;
+
+            env.storage().instance().set(&key, &slot);
+        } else {
+            panic_with_error!(&env, SlotError::NotFound);
+        }
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn complete_booking(env: Env, id: Symbol, provider: Address) {
+        provider.require_auth();
+
+        let key = Self::slot_key(&id);
+        let maybe: Option<Slot> = env.storage().instance().get(&key);
+
+        if let Some(mut slot) = maybe {
+            if slot.provider != provider {
+                panic_with_error!(&env, SlotError::Unauthorized);
+            }
+            if !slot.is_booked {
+                panic_with_error!(&env, SlotError::NotBooked);
+            }
+
+            let completed = Symbol::new(&env, "completed");
+            slot.status = completed;
+
+            env.storage().instance().set(&key, &slot);
+        } else {
+            panic_with_error!(&env, SlotError::NotFound);
+        }
+    }
+
+    pub fn get_slot(env: Env, id: Symbol) -> Option<Slot> {
+        env.storage().instance().get(&Self::slot_key(&id))
+    }
+
+    pub fn list_slots(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_slot_count(env: Env) -> u32 {
+        env.storage().instance().get(&SlotDataKey::Count).unwrap_or(0)
     }
 }

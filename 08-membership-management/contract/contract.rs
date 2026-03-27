@@ -7,29 +7,36 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct MembershipManagementContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct Member {
+    pub member: Address,
+    pub name: String,
+    pub email: String,
+    pub tier: Symbol,
+    pub status: Symbol,
+    pub joined_at: u64,
+    pub expires_at: u64,
+    pub renewed_count: u32,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum MembershipManagementContractDataKey {
+pub enum DataKey {
     IdList,
-    Item(Symbol),
+    Member(Symbol),
     Count,
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum MembershipManagementContractError {
-    InvalidTitle = 1,
+pub enum ContractError {
+    InvalidName = 1,
     InvalidTimestamp = 2,
+    MemberNotFound = 3,
+    NotMember = 4,
+    InvalidTier = 5,
+    AlreadySuspended = 6,
+    AlreadyActive = 7,
 }
 
 #[contract]
@@ -37,31 +44,16 @@ pub struct MembershipManagementContract;
 
 #[contractimpl]
 impl MembershipManagementContract {
-    fn count_key() -> MembershipManagementContractDataKey {
-        MembershipManagementContractDataKey::Count
+    fn ids_key() -> DataKey {
+        DataKey::IdList
     }
 
-    fn ids_key() -> MembershipManagementContractDataKey {
-        MembershipManagementContractDataKey::IdList
+    fn member_key(id: &Symbol) -> DataKey {
+        DataKey::Member(id.clone())
     }
 
-    fn item_key(id: &Symbol) -> MembershipManagementContractDataKey {
-        MembershipManagementContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, MembershipManagementContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, MembershipManagementContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn count_key() -> DataKey {
+        DataKey::Count
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
@@ -81,23 +73,46 @@ impl MembershipManagementContract {
         false
     }
 
-    pub fn enroll_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    fn increment_count(env: &Env) {
+        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
+        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    }
 
-        let item = MembershipManagementContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+    pub fn register_member(
+        env: Env,
+        id: Symbol,
+        member: Address,
+        name: String,
+        email: String,
+        tier: Symbol,
+        joined_at: u64,
+    ) {
+        member.require_auth();
+
+        if name.len() == 0 {
+            panic_with_error!(&env, ContractError::InvalidName);
+        }
+
+        if joined_at == 0 {
+            panic_with_error!(&env, ContractError::InvalidTimestamp);
+        }
+
+        let active = Symbol::new(&env, "active");
+
+        let record = Member {
+            member,
+            name,
+            email,
+            tier,
+            status: active,
+            joined_at,
+            expires_at: 0,
+            renewed_count: 0,
         };
 
-        let key = Self::item_key(&id);
+        let key = Self::member_key(&id);
         let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &record);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
@@ -109,32 +124,80 @@ impl MembershipManagementContract {
         }
     }
 
-    pub fn update_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<MembershipManagementContractItem> = env.storage().instance().get(&key);
+    pub fn upgrade_tier(env: Env, id: Symbol, member: Address, new_tier: Symbol) {
+        member.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        let key = Self::member_key(&id);
+        let mut record: Member = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::MemberNotFound));
+
+        if record.member != member {
+            panic_with_error!(&env, ContractError::NotMember);
         }
+
+        record.tier = new_tier;
+        env.storage().instance().set(&key, &record);
     }
 
-    pub fn revoke_item(env: Env, id: Symbol) -> Option<MembershipManagementContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn renew_membership(env: Env, id: Symbol, member: Address, new_expiry: u64) {
+        member.require_auth();
+
+        let key = Self::member_key(&id);
+        let mut record: Member = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::MemberNotFound));
+
+        if record.member != member {
+            panic_with_error!(&env, ContractError::NotMember);
+        }
+
+        let active = Symbol::new(&env, "active");
+        record.expires_at = new_expiry;
+        record.status = active;
+        record.renewed_count = record.renewed_count + 1;
+        env.storage().instance().set(&key, &record);
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn suspend_member(env: Env, id: Symbol, admin: Address) {
+        admin.require_auth();
+
+        let key = Self::member_key(&id);
+        let mut record: Member = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::MemberNotFound));
+
+        let suspended = Symbol::new(&env, "suspended");
+        if record.status == suspended {
+            panic_with_error!(&env, ContractError::AlreadySuspended);
+        }
+
+        record.status = suspended;
+        env.storage().instance().set(&key, &record);
+    }
+
+    pub fn activate_member(env: Env, id: Symbol, admin: Address) {
+        admin.require_auth();
+
+        let key = Self::member_key(&id);
+        let mut record: Member = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::MemberNotFound));
+
+        let active = Symbol::new(&env, "active");
+        if record.status == active {
+            panic_with_error!(&env, ContractError::AlreadyActive);
+        }
+
+        record.status = active;
+        env.storage().instance().set(&key, &record);
+    }
+
+    pub fn get_member(env: Env, id: Symbol) -> Option<Member> {
+        env.storage().instance().get(&Self::member_key(&id))
+    }
+
+    pub fn list_members(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
+    pub fn get_member_count(env: Env) -> u32 {
         env.storage().instance().get(&Self::count_key()).unwrap_or(0)
     }
 }

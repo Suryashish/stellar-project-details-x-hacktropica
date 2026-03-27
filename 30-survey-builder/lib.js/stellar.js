@@ -9,7 +9,7 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
 
 const requireConfig = () => {
@@ -89,41 +89,64 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const createEntry = async (payload) => {
+export const createSurvey = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.creator) throw new Error("creator address is required");
 
-    return invokeWrite("create_item", [
+    return invokeWrite("create_survey", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
+        new Address(payload.creator).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.description || ""),
+        toU32(payload.questionCount),
+        toU64(payload.endTime),
     ]);
 };
 
-export const distributeEntry = async (payload) => {
+export const submitResponse = async (payload) => {
+    if (!payload?.surveyId) throw new Error("surveyId is required");
+    if (!payload?.respondent) throw new Error("respondent address is required");
+
+    return invokeWrite("submit_response", [
+        toSymbol(payload.surveyId),
+        new Address(payload.respondent).toScVal(),
+        nativeToScVal(payload.answers || ""),
+    ]);
+};
+
+export const closeSurvey = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.creator) throw new Error("creator address is required");
 
-    return invokeWrite("distribute_item", [
+    return invokeWrite("close_survey", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.creator).toScVal(),
     ]);
 };
 
-export const analyzeEntry = async (id) => {
+export const getSurvey = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("analyze_item", [toSymbol(id)]);
+    return invokeRead("get_survey", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listSurveys = async () => {
+    return invokeRead("list_surveys", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getResponseCount = async (surveyId) => {
+    if (!surveyId) throw new Error("surveyId is required");
+    return invokeRead("get_response_count", [toSymbol(surveyId)]);
+};
+
+export const hasResponded = async (surveyId, respondent) => {
+    if (!surveyId) throw new Error("surveyId is required");
+    if (!respondent) throw new Error("respondent address is required");
+    return invokeRead("has_responded", [
+        toSymbol(surveyId),
+        new Address(respondent).toScVal(),
+    ]);
+};
+
+export const getSurveyCount = async () => {
+    return invokeRead("get_survey_count", []);
 };

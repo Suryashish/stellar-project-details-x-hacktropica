@@ -1,32 +1,20 @@
 import React, { useState } from "react";
-import { checkConnection, enrollEntry, progressEntry, completeEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 9,
-    title: "Learning / Course Platform",
-    style: "curriculum",
-    label: "course",
-    writeAction: "enroll",
-    updateAction: "progress",
-    readAction: "complete",
-};
-
-const nowTs = () => Math.floor(Date.now() / 1000);
+import { checkConnection, createCourse, enrollStudent, completeCourse, rateCourse, getCourse, listCourses, getEnrollmentCount } from "../lib.js/stellar.js";
 
 const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
+    id: "course1",
+    instructor: "",
+    student: "",
+    title: "Intro to Soroban",
+    description: "Learn smart contract development on Stellar",
+    category: "blockchain",
+    maxStudents: "30",
+    price: "5000",
+    rating: "5",
 });
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
@@ -35,22 +23,11 @@ export default function App() {
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
 
     const setField = (event) => {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +43,104 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => enrollEntry(payload()));
+    const onCreateCourse = () => runAction(async () => createCourse({
+        id: form.id.trim(),
+        instructor: form.instructor.trim(),
+        title: form.title.trim(),
+        description: form.description.trim(),
+        category: form.category.trim(),
+        maxStudents: form.maxStudents.trim(),
+        price: form.price.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return progressEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onEnrollStudent = () => runAction(async () => enrollStudent({
+        courseId: form.id.trim(),
+        student: form.student.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return completeEntry(next.id);
-    });
+    const onCompleteCourse = () => runAction(async () => completeCourse({
+        courseId: form.id.trim(),
+        student: form.student.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onRateCourse = () => runAction(async () => rateCourse({
+        courseId: form.id.trim(),
+        student: form.student.trim(),
+        rating: form.rating.trim(),
+    }));
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
-        return { count: value };
-    });
+    const onGetCourse = () => runAction(async () => getCourse(form.id.trim()));
+    const onListCourses = () => runAction(async () => listCourses());
+    const onGetEnrollmentCount = () => runAction(async () => getEnrollmentCount(form.id.trim()));
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 9</p>
+                <h1>Learning Platform</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Create courses, enroll students, track completions, and manage ratings.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
+                <h2>Course Details</h2>
+
+                <label htmlFor="entryId">Course ID (Symbol)</label>
                 <input id="entryId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="instructor">Instructor Address</label>
+                <input id="instructor" name="instructor" value={form.instructor} onChange={setField} placeholder="G..." />
 
                 <label htmlFor="title">Title</label>
                 <input id="title" name="title" value={form.title} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="description">Description</label>
+                <textarea id="description" name="description" rows="3" value={form.description} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="maxStudents">Max Students (u32)</label>
+                <input id="maxStudents" name="maxStudents" value={form.maxStudents} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="price">Price (i128)</label>
+                <input id="price" name="price" value={form.price} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateCourse} disabled={isBusy}>Create Course</button>
+                    <button type="button" onClick={onGetCourse} disabled={isBusy}>Get Course</button>
+                    <button type="button" onClick={onListCourses} disabled={isBusy}>List Courses</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Student Actions</h2>
+
+                <label htmlFor="student">Student Address</label>
+                <input id="student" name="student" value={form.student} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="rating">Rating (1-5)</label>
+                <select id="rating" name="rating" value={form.rating} onChange={setField}>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                </select>
+
+                <div className="actions">
+                    <button type="button" onClick={onEnrollStudent} disabled={isBusy}>Enroll Student</button>
+                    <button type="button" onClick={onCompleteCourse} disabled={isBusy}>Complete Course</button>
+                    <button type="button" onClick={onRateCourse} disabled={isBusy}>Rate Course</button>
+                    <button type="button" onClick={onGetEnrollmentCount} disabled={isBusy}>Get Enrollment Count</button>
                 </div>
             </section>
 

@@ -7,29 +7,38 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct TicketingContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct Ticket {
+    pub reporter: Address,
+    pub assignee: Address,
+    pub subject: String,
+    pub description: String,
+    pub category: Symbol,
+    pub priority: u32,
+    pub response_count: u32,
+    pub status: Symbol,
+    pub created_at: u64,
+    pub closed_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum TicketingContractDataKey {
+pub enum DataKey {
     IdList,
-    Item(Symbol),
-    Count,
+    Ticket(Symbol),
+    OpenCount,
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum TicketingContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum TicketError {
+    NotFound = 1,
+    InvalidSubject = 2,
+    InvalidStatus = 3,
+    NotReporter = 4,
+    AlreadyExists = 5,
+    InvalidPriority = 6,
+    AlreadyClosed = 7,
 }
 
 #[contract]
@@ -37,39 +46,12 @@ pub struct TicketingContract;
 
 #[contractimpl]
 impl TicketingContract {
-    fn count_key() -> TicketingContractDataKey {
-        TicketingContractDataKey::Count
-    }
-
-    fn ids_key() -> TicketingContractDataKey {
-        TicketingContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> TicketingContractDataKey {
-        TicketingContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, TicketingContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, TicketingContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage().instance().get(&DataKey::IdList).unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&DataKey::IdList, ids);
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +63,177 @@ impl TicketingContract {
         false
     }
 
-    pub fn create_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    fn status_open(env: &Env) -> Symbol {
+        Symbol::new(env, "open")
+    }
 
-        let item = TicketingContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+    fn status_assigned(env: &Env) -> Symbol {
+        Symbol::new(env, "assigned")
+    }
+
+    fn status_in_progress(env: &Env) -> Symbol {
+        Symbol::new(env, "in_progress")
+    }
+
+    fn status_closed(env: &Env) -> Symbol {
+        Symbol::new(env, "closed")
+    }
+
+    fn status_reopened(env: &Env) -> Symbol {
+        Symbol::new(env, "reopened")
+    }
+
+    fn increment_open(env: &Env) {
+        let count: u32 = env.storage().instance().get(&DataKey::OpenCount).unwrap_or(0);
+        env.storage().instance().set(&DataKey::OpenCount, &(count + 1));
+    }
+
+    fn decrement_open(env: &Env) {
+        let count: u32 = env.storage().instance().get(&DataKey::OpenCount).unwrap_or(0);
+        if count > 0 {
+            env.storage().instance().set(&DataKey::OpenCount, &(count - 1));
+        }
+    }
+
+    pub fn create_ticket(
+        env: Env,
+        id: Symbol,
+        reporter: Address,
+        subject: String,
+        description: String,
+        category: Symbol,
+        priority: u32,
+    ) {
+        reporter.require_auth();
+
+        if subject.len() == 0 {
+            panic_with_error!(&env, TicketError::InvalidSubject);
+        }
+        if priority < 1 || priority > 5 {
+            panic_with_error!(&env, TicketError::InvalidPriority);
+        }
+
+        let key = DataKey::Ticket(id.clone());
+        if env.storage().instance().has(&key) {
+            panic_with_error!(&env, TicketError::AlreadyExists);
+        }
+
+        let ticket = Ticket {
+            reporter: reporter.clone(),
+            assignee: reporter,
+            subject,
+            description,
+            category,
+            priority,
+            response_count: 0,
+            status: Self::status_open(&env),
+            created_at: env.ledger().timestamp(),
+            closed_at: 0,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &ticket);
+        Self::increment_open(&env);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
+        }
+    }
+
+    pub fn assign_ticket(env: Env, id: Symbol, admin: Address, assignee: Address) {
+        admin.require_auth();
+
+        let key = DataKey::Ticket(id.clone());
+        let maybe: Option<Ticket> = env.storage().instance().get(&key);
+
+        if let Some(mut ticket) = maybe {
+            let closed = Self::status_closed(&env);
+            if ticket.status == closed {
+                panic_with_error!(&env, TicketError::AlreadyClosed);
             }
-        }
-    }
-
-    pub fn claim_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<TicketingContractItem> = env.storage().instance().get(&key);
-
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+            ticket.assignee = assignee;
+            ticket.status = Self::status_assigned(&env);
+            env.storage().instance().set(&key, &ticket);
         } else {
-            false
+            panic_with_error!(&env, TicketError::NotFound);
         }
     }
 
-    pub fn resolve_item(env: Env, id: Symbol) -> Option<TicketingContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn add_response(env: Env, id: Symbol, responder: Address, _message: String) {
+        responder.require_auth();
+
+        let key = DataKey::Ticket(id.clone());
+        let maybe: Option<Ticket> = env.storage().instance().get(&key);
+
+        if let Some(mut ticket) = maybe {
+            let closed = Self::status_closed(&env);
+            if ticket.status == closed {
+                panic_with_error!(&env, TicketError::AlreadyClosed);
+            }
+            ticket.response_count += 1;
+            let assigned = Self::status_assigned(&env);
+            if ticket.status == assigned {
+                ticket.status = Self::status_in_progress(&env);
+            }
+            env.storage().instance().set(&key, &ticket);
+        } else {
+            panic_with_error!(&env, TicketError::NotFound);
+        }
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn close_ticket(env: Env, id: Symbol, closer: Address) {
+        closer.require_auth();
+
+        let key = DataKey::Ticket(id.clone());
+        let maybe: Option<Ticket> = env.storage().instance().get(&key);
+
+        if let Some(mut ticket) = maybe {
+            let closed = Self::status_closed(&env);
+            if ticket.status == closed {
+                panic_with_error!(&env, TicketError::AlreadyClosed);
+            }
+            ticket.status = Self::status_closed(&env);
+            ticket.closed_at = env.ledger().timestamp();
+            env.storage().instance().set(&key, &ticket);
+            Self::decrement_open(&env);
+        } else {
+            panic_with_error!(&env, TicketError::NotFound);
+        }
+    }
+
+    pub fn reopen_ticket(env: Env, id: Symbol, reporter: Address) {
+        reporter.require_auth();
+
+        let key = DataKey::Ticket(id.clone());
+        let maybe: Option<Ticket> = env.storage().instance().get(&key);
+
+        if let Some(mut ticket) = maybe {
+            if ticket.reporter != reporter {
+                panic_with_error!(&env, TicketError::NotReporter);
+            }
+            let closed = Self::status_closed(&env);
+            if ticket.status != closed {
+                panic_with_error!(&env, TicketError::InvalidStatus);
+            }
+            ticket.status = Self::status_reopened(&env);
+            ticket.closed_at = 0;
+            env.storage().instance().set(&key, &ticket);
+            Self::increment_open(&env);
+        } else {
+            panic_with_error!(&env, TicketError::NotFound);
+        }
+    }
+
+    pub fn get_ticket(env: Env, id: Symbol) -> Option<Ticket> {
+        env.storage().instance().get(&DataKey::Ticket(id))
+    }
+
+    pub fn list_tickets(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_open_count(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::OpenCount).unwrap_or(0)
     }
 }

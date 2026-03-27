@@ -11,6 +11,7 @@ const server = new rpc.Server(RPC_URL);
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toBool = (value) => xdr.ScVal.scvBool(!!value);
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +90,53 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const sendEntry = async (payload) => {
-    if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
-
-    return invokeWrite("send_item", [
-        toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+export const setRate = async (recipient, ratePerMessage) => {
+    if (!recipient) throw new Error("recipient address is required");
+    return invokeWrite("set_rate", [
+        new Address(recipient).toScVal(),
+        toI128(ratePerMessage),
     ]);
 };
 
-export const receiveEntry = async (payload) => {
+export const sendMessage = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.sender) throw new Error("sender address is required");
+    if (!payload?.recipient) throw new Error("recipient address is required");
 
-    return invokeWrite("receive_item", [
+    return invokeWrite("send_message", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.sender).toScVal(),
+        new Address(payload.recipient).toScVal(),
+        nativeToScVal(payload.content || ""),
+        toI128(payload.paymentAmount),
     ]);
 };
 
-export const tipEntry = async (id) => {
+export const readMessage = async (id, recipient) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("tip_item", [toSymbol(id)]);
+    if (!recipient) throw new Error("recipient address is required");
+    return invokeWrite("read_message", [
+        toSymbol(id),
+        new Address(recipient).toScVal(),
+    ]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const getMessage = async (id) => {
+    if (!id) throw new Error("id is required");
+    return invokeRead("get_message", [toSymbol(id)]);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const listInbox = async (recipient) => {
+    if (!recipient) throw new Error("recipient address is required");
+    return invokeRead("list_inbox", [new Address(recipient).toScVal()]);
+};
+
+export const getRate = async (recipient) => {
+    if (!recipient) throw new Error("recipient address is required");
+    return invokeRead("get_rate", [new Address(recipient).toScVal()]);
+};
+
+export const getEarnings = async (recipient) => {
+    if (!recipient) throw new Error("recipient address is required");
+    return invokeRead("get_earnings", [new Address(recipient).toScVal()]);
 };

@@ -7,29 +7,46 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct MemoChatContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct Memo {
+    pub sender: Address,
+    pub channel: Symbol,
+    pub content: String,
+    pub timestamp: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum MemoChatContractDataKey {
-    IdList,
-    Item(Symbol),
-    Count,
+pub struct Channel {
+    pub creator: Address,
+    pub channel_name: String,
+    pub description: String,
+    pub member_count: u32,
+    pub message_count: u32,
+    pub is_public: bool,
+    pub created_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub enum MemoChatDataKey {
+    MemoList,
+    Memo(Symbol),
+    ChannelList,
+    Channel(Symbol),
+    ChannelMembers(Symbol),
+    ChannelMsgCount(Symbol),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum MemoChatContractError {
-    InvalidTitle = 1,
+pub enum MemoChatError {
+    ContentEmpty = 1,
     InvalidTimestamp = 2,
+    ChannelNotFound = 3,
+    NotAMember = 4,
+    ChannelNameEmpty = 5,
+    AlreadyMember = 6,
 }
 
 #[contract]
@@ -37,39 +54,28 @@ pub struct MemoChatContract;
 
 #[contractimpl]
 impl MemoChatContract {
-    fn count_key() -> MemoChatContractDataKey {
-        MemoChatContractDataKey::Count
+    fn memo_key(id: &Symbol) -> MemoChatDataKey {
+        MemoChatDataKey::Memo(id.clone())
     }
 
-    fn ids_key() -> MemoChatContractDataKey {
-        MemoChatContractDataKey::IdList
+    fn memo_list_key() -> MemoChatDataKey {
+        MemoChatDataKey::MemoList
     }
 
-    fn item_key(id: &Symbol) -> MemoChatContractDataKey {
-        MemoChatContractDataKey::Item(id.clone())
+    fn channel_key(id: &Symbol) -> MemoChatDataKey {
+        MemoChatDataKey::Channel(id.clone())
     }
 
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, MemoChatContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, MemoChatContractError::InvalidTimestamp);
-        }
+    fn channel_list_key() -> MemoChatDataKey {
+        MemoChatDataKey::ChannelList
     }
 
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn channel_members_key(id: &Symbol) -> MemoChatDataKey {
+        MemoChatDataKey::ChannelMembers(id.clone())
     }
 
-    fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
-    }
-
-    fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+    fn load_ids(env: &Env, key: &MemoChatDataKey) -> Vec<Symbol> {
+        env.storage().instance().get(key).unwrap_or(Vec::new(env))
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +87,134 @@ impl MemoChatContract {
         false
     }
 
-    pub fn compose_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    pub fn create_channel(
+        env: Env,
+        id: Symbol,
+        creator: Address,
+        channel_name: String,
+        description: String,
+        is_public: bool,
+    ) {
+        creator.require_auth();
 
-        let item = MemoChatContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+        if channel_name.len() == 0 {
+            panic_with_error!(&env, MemoChatError::ChannelNameEmpty);
+        }
+
+        let channel = Channel {
+            creator: creator.clone(),
+            channel_name,
+            description,
+            member_count: 1,
+            message_count: 0,
+            is_public,
+            created_at: env.ledger().timestamp(),
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
+        env.storage().instance().set(&Self::channel_key(&id), &channel);
 
-        env.storage().instance().set(&key, &item);
+        let mut channels = Self::load_ids(&env, &Self::channel_list_key());
+        if !Self::has_id(&channels, &id) {
+            channels.push_back(id.clone());
+            env.storage().instance().set(&Self::channel_list_key(), &channels);
+        }
 
-        let mut ids = Self::load_ids(&env);
-        if !Self::has_id(&ids, &id) {
-            ids.push_back(id);
-            Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
+        let mut members: Vec<Address> = Vec::new(&env);
+        members.push_back(creator);
+        env.storage().instance().set(&Self::channel_members_key(&id), &members);
+    }
+
+    pub fn join_channel(env: Env, channel_id: Symbol, member: Address) {
+        member.require_auth();
+
+        let ch_key = Self::channel_key(&channel_id);
+        let maybe_channel: Option<Channel> = env.storage().instance().get(&ch_key);
+        if maybe_channel.is_none() {
+            panic_with_error!(&env, MemoChatError::ChannelNotFound);
+        }
+        let mut channel = maybe_channel.unwrap();
+
+        let mem_key = Self::channel_members_key(&channel_id);
+        let mut members: Vec<Address> = env.storage().instance().get(&mem_key).unwrap_or(Vec::new(&env));
+
+        let mut already = false;
+        for m in members.iter() {
+            if m == member {
+                already = true;
             }
         }
-    }
-
-    pub fn broadcast_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<MemoChatContractItem> = env.storage().instance().get(&key);
-
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        if already {
+            panic_with_error!(&env, MemoChatError::AlreadyMember);
         }
+
+        members.push_back(member);
+        env.storage().instance().set(&mem_key, &members);
+
+        channel.member_count += 1;
+        env.storage().instance().set(&ch_key, &channel);
     }
 
-    pub fn track_item(env: Env, id: Symbol) -> Option<MemoChatContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn send_memo(
+        env: Env,
+        id: Symbol,
+        sender: Address,
+        channel: Symbol,
+        content: String,
+        timestamp: u64,
+    ) {
+        sender.require_auth();
+
+        if content.len() == 0 {
+            panic_with_error!(&env, MemoChatError::ContentEmpty);
+        }
+        if timestamp == 0 {
+            panic_with_error!(&env, MemoChatError::InvalidTimestamp);
+        }
+
+        let ch_key = Self::channel_key(&channel);
+        let maybe_channel: Option<Channel> = env.storage().instance().get(&ch_key);
+        if maybe_channel.is_none() {
+            panic_with_error!(&env, MemoChatError::ChannelNotFound);
+        }
+        let mut ch = maybe_channel.unwrap();
+
+        let memo = Memo {
+            sender,
+            channel: channel.clone(),
+            content,
+            timestamp,
+        };
+
+        env.storage().instance().set(&Self::memo_key(&id), &memo);
+
+        let mut memos = Self::load_ids(&env, &Self::memo_list_key());
+        if !Self::has_id(&memos, &id) {
+            memos.push_back(id);
+            env.storage().instance().set(&Self::memo_list_key(), &memos);
+        }
+
+        ch.message_count += 1;
+        env.storage().instance().set(&ch_key, &ch);
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
-        Self::load_ids(&env)
+    pub fn get_memo(env: Env, id: Symbol) -> Option<Memo> {
+        env.storage().instance().get(&Self::memo_key(&id))
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_channel(env: Env, id: Symbol) -> Option<Channel> {
+        env.storage().instance().get(&Self::channel_key(&id))
+    }
+
+    pub fn list_channels(env: Env) -> Vec<Symbol> {
+        Self::load_ids(&env, &Self::channel_list_key())
+    }
+
+    pub fn get_channel_message_count(env: Env, channel_id: Symbol) -> u32 {
+        let maybe_channel: Option<Channel> = env.storage().instance().get(&Self::channel_key(&channel_id));
+        if let Some(ch) = maybe_channel {
+            ch.message_count
+        } else {
+            0
+        }
     }
 }

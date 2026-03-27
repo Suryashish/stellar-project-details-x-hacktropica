@@ -1,56 +1,35 @@
 import React, { useState } from "react";
-import { checkConnection, bookEntry, attendEntry, rateEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 37,
-    title: "Pay-per-Session Learning",
-    style: "calendar-schedule",
-    label: "lesson",
-    writeAction: "book",
-    updateAction: "attend",
-    readAction: "rate",
-};
+import { checkConnection, createSession, bookSession, startSession, completeSession, cancelSession, rateSession, getSession, listSessions } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
-
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "session1",
+        tutor: "",
+        student: "",
+        subject: "Introduction to Stellar",
+        description: "Learn the basics of Stellar smart contracts",
+        sessionDate: String(nowTs() + 86400),
+        durationMins: "60",
+        price: "500",
+        maxAttendees: "10",
+        paymentAmount: "500",
+        rating: "5",
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
 
     const setField = (event) => {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +45,89 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => bookEntry(payload()));
+    const onCreateSession = () => runAction(() => createSession({
+        id: form.id.trim(),
+        tutor: form.tutor.trim(),
+        subject: form.subject.trim(),
+        description: form.description.trim(),
+        sessionDate: form.sessionDate.trim(),
+        durationMins: form.durationMins.trim(),
+        price: form.price.trim(),
+        maxAttendees: form.maxAttendees.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return attendEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onBookSession = () => runAction(() => bookSession(form.id.trim(), form.student.trim(), form.paymentAmount.trim()));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return rateEntry(next.id);
-    });
+    const onStartSession = () => runAction(() => startSession(form.id.trim(), form.tutor.trim()));
 
-    const onList = () => runAction(async () => listIds());
+    const onCompleteSession = () => runAction(() => completeSession(form.id.trim(), form.tutor.trim()));
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
-        return { count: value };
-    });
+    const onCancelSession = () => runAction(() => cancelSession(form.id.trim(), form.tutor.trim()));
+
+    const onRateSession = () => runAction(() => rateSession(form.id.trim(), form.student.trim(), form.rating.trim()));
+
+    const onGetSession = () => runAction(() => getSession(form.id.trim()));
+
+    const onListSessions = () => runAction(() => listSessions());
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
-                <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
-                </p>
-                <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
+                <p className="kicker">Stellar Soroban Project 37</p>
+                <h1>Pay-per-Session Learning</h1>
+                <p className="subtitle">Create tutoring sessions, book with payment, rate after completion.</p>
+                <button type="button" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="sessionId">Session ID</label>
+                <input id="sessionId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="tutor">Tutor Address</label>
+                <input id="tutor" name="tutor" value={form.tutor} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="student">Student Address</label>
+                <input id="student" name="student" value={form.student} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="subject">Subject</label>
+                <input id="subject" name="subject" value={form.subject} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="description">Description</label>
+                <textarea id="description" name="description" rows="2" value={form.description} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="sessionDate">Session Date (u64 timestamp)</label>
+                <input id="sessionDate" name="sessionDate" value={form.sessionDate} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="durationMins">Duration (minutes)</label>
+                <input id="durationMins" name="durationMins" value={form.durationMins} onChange={setField} type="number" />
+
+                <label htmlFor="price">Price (i128)</label>
+                <input id="price" name="price" value={form.price} onChange={setField} type="number" />
+
+                <label htmlFor="maxAttendees">Max Attendees</label>
+                <input id="maxAttendees" name="maxAttendees" value={form.maxAttendees} onChange={setField} type="number" />
+
+                <label htmlFor="paymentAmount">Payment Amount (i128)</label>
+                <input id="paymentAmount" name="paymentAmount" value={form.paymentAmount} onChange={setField} type="number" />
+
+                <label htmlFor="rating">Rating (1-5)</label>
+                <input id="rating" name="rating" value={form.rating} onChange={setField} type="number" min="1" max="5" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateSession} disabled={isBusy}>Create Session</button>
+                    <button type="button" onClick={onBookSession} disabled={isBusy}>Book Session</button>
+                    <button type="button" onClick={onStartSession} disabled={isBusy}>Start Session</button>
+                    <button type="button" onClick={onCompleteSession} disabled={isBusy}>Complete Session</button>
+                    <button type="button" onClick={onCancelSession} disabled={isBusy}>Cancel Session</button>
+                    <button type="button" onClick={onRateSession} disabled={isBusy}>Rate Session</button>
+                    <button type="button" onClick={onGetSession} disabled={isBusy}>Get Session</button>
+                    <button type="button" onClick={onListSessions} disabled={isBusy}>List Sessions</button>
                 </div>
             </section>
 

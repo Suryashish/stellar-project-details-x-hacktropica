@@ -7,29 +7,42 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct ResourceSharingContractItem {
+pub struct SharedResource {
     pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+    pub name: String,
+    pub description: String,
+    pub category: Symbol,
+    pub daily_rate: i128,
+    pub deposit_required: i128,
+    pub borrower: Address,
+    pub status: Symbol,
+    pub total_rating: u32,
+    pub rating_count: u32,
+    pub borrow_count: u32,
+    pub listed_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum ResourceSharingContractDataKey {
+pub enum ResourceDataKey {
     IdList,
     Item(Symbol),
-    Count,
+    AvailableCount,
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum ResourceSharingContractError {
-    InvalidTitle = 1,
+pub enum ResourceError {
+    InvalidName = 1,
     InvalidTimestamp = 2,
+    NotFound = 3,
+    NotOwner = 4,
+    NotBorrower = 5,
+    NotAvailable = 6,
+    AlreadyAvailable = 7,
+    InvalidRating = 8,
+    InvalidDates = 9,
 }
 
 #[contract]
@@ -37,31 +50,16 @@ pub struct ResourceSharingContract;
 
 #[contractimpl]
 impl ResourceSharingContract {
-    fn count_key() -> ResourceSharingContractDataKey {
-        ResourceSharingContractDataKey::Count
+    fn ids_key() -> ResourceDataKey {
+        ResourceDataKey::IdList
     }
 
-    fn ids_key() -> ResourceSharingContractDataKey {
-        ResourceSharingContractDataKey::IdList
+    fn item_key(id: &Symbol) -> ResourceDataKey {
+        ResourceDataKey::Item(id.clone())
     }
 
-    fn item_key(id: &Symbol) -> ResourceSharingContractDataKey {
-        ResourceSharingContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, ResourceSharingContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, ResourceSharingContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn available_count_key() -> ResourceDataKey {
+        ResourceDataKey::AvailableCount
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
@@ -81,60 +79,153 @@ impl ResourceSharingContract {
         false
     }
 
-    pub fn list_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    fn get_available(env: &Env) -> u32 {
+        env.storage().instance().get(&Self::available_count_key()).unwrap_or(0)
+    }
 
-        let item = ResourceSharingContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+    fn set_available(env: &Env, count: u32) {
+        env.storage().instance().set(&Self::available_count_key(), &count);
+    }
+
+    pub fn list_resource(
+        env: Env,
+        id: Symbol,
+        owner: Address,
+        name: String,
+        description: String,
+        category: Symbol,
+        daily_rate: i128,
+        deposit_required: i128,
+    ) {
+        owner.require_auth();
+
+        if name.len() == 0 {
+            panic_with_error!(env, ResourceError::InvalidName);
+        }
+
+        let available_sym = Symbol::new(&env, "available");
+
+        let resource = SharedResource {
+            owner: owner.clone(),
+            name,
+            description,
+            category,
+            daily_rate,
+            deposit_required,
+            borrower: owner,
+            status: available_sym,
+            total_rating: 0,
+            rating_count: 0,
+            borrow_count: 0,
+            listed_at: env.ledger().timestamp(),
         };
 
         let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &resource);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
-            }
         }
+
+        let count = Self::get_available(&env);
+        Self::set_available(&env, count + 1);
     }
 
-    pub fn borrow_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
+    pub fn borrow_resource(
+        env: Env,
+        id: Symbol,
+        borrower: Address,
+        start_date: u64,
+        end_date: u64,
+    ) {
+        borrower.require_auth();
+
+        if end_date <= start_date {
+            panic_with_error!(env, ResourceError::InvalidDates);
+        }
+
         let key = Self::item_key(&id);
-        let maybe_item: Option<ResourceSharingContractItem> = env.storage().instance().get(&key);
+        let maybe_resource: Option<SharedResource> = env.storage().instance().get(&key);
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+        if let Some(mut resource) = maybe_resource {
+            let available_sym = Symbol::new(&env, "available");
+            if resource.status != available_sym {
+                panic_with_error!(env, ResourceError::NotAvailable);
+            }
+
+            let borrowed_sym = Symbol::new(&env, "borrowed");
+            resource.status = borrowed_sym;
+            resource.borrower = borrower;
+            resource.borrow_count += 1;
+            env.storage().instance().set(&key, &resource);
+
+            let count = Self::get_available(&env);
+            if count > 0 {
+                Self::set_available(&env, count - 1);
+            }
         } else {
-            false
+            panic_with_error!(env, ResourceError::NotFound);
         }
     }
 
-    pub fn return_item(env: Env, id: Symbol) -> Option<ResourceSharingContractItem> {
+    pub fn return_resource(env: Env, id: Symbol, borrower: Address, condition_notes: String) {
+        borrower.require_auth();
+
+        let key = Self::item_key(&id);
+        let maybe_resource: Option<SharedResource> = env.storage().instance().get(&key);
+
+        if let Some(mut resource) = maybe_resource {
+            if resource.borrower != borrower {
+                panic_with_error!(env, ResourceError::NotBorrower);
+            }
+
+            let borrowed_sym = Symbol::new(&env, "borrowed");
+            if resource.status != borrowed_sym {
+                panic_with_error!(env, ResourceError::AlreadyAvailable);
+            }
+
+            let returned_sym = Symbol::new(&env, "returned");
+            resource.status = returned_sym;
+            resource.description = condition_notes;
+            env.storage().instance().set(&key, &resource);
+
+            let count = Self::get_available(&env);
+            Self::set_available(&env, count + 1);
+        } else {
+            panic_with_error!(env, ResourceError::NotFound);
+        }
+    }
+
+    pub fn rate_transaction(env: Env, id: Symbol, rater: Address, rating: u32) {
+        rater.require_auth();
+
+        if rating == 0 || rating > 5 {
+            panic_with_error!(env, ResourceError::InvalidRating);
+        }
+
+        let key = Self::item_key(&id);
+        let maybe_resource: Option<SharedResource> = env.storage().instance().get(&key);
+
+        if let Some(mut resource) = maybe_resource {
+            resource.total_rating += rating;
+            resource.rating_count += 1;
+            env.storage().instance().set(&key, &resource);
+        } else {
+            panic_with_error!(env, ResourceError::NotFound);
+        }
+    }
+
+    pub fn get_resource(env: Env, id: Symbol) -> Option<SharedResource> {
         env.storage().instance().get(&Self::item_key(&id))
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn list_resources(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_available_count(env: Env) -> u32 {
+        Self::get_available(&env)
     }
 }

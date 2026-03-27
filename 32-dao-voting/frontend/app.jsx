@@ -1,56 +1,34 @@
 import React, { useState } from "react";
-import { checkConnection, submitEntry, voteEntry, executeEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 32,
-    title: "DAO Voting",
-    style: "governance-grid",
-    label: "proposal",
-    writeAction: "submit",
-    updateAction: "vote",
-    readAction: "execute",
-};
-
-const nowTs = () => Math.floor(Date.now() / 1000);
-
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
+import { checkConnection, createProposal, castVote, executeProposal, vetoProposal, getProposal, listProposals, hasVoted, getProposalCount } from "../lib.js/stellar.js";
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "prop1",
+        proposer: "",
+        title: "Fund ecosystem grants",
+        description: "Allocate 10000 XLM for developer grants",
+        category: "treasury",
+        votingPeriod: "604800",
+        voter: "",
+        votePower: "100",
+        inFavor: true,
+        executor: "",
+        vetoer: "",
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
     const [countValue, setCountValue] = useState("-");
 
     const setField = (event) => {
-        const { name, value } = event.target;
-        setForm((prev) => ({ ...prev, [name]: value }));
+        const { name, value, type, checked } = event.target;
+        setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -71,27 +49,43 @@ export default function App() {
         return nextWalletState;
     });
 
-    const onWrite = () => runAction(async () => submitEntry(payload()));
+    const onCreateProposal = () => runAction(async () => createProposal({
+        id: form.id.trim(),
+        proposer: form.proposer.trim(),
+        title: form.title.trim(),
+        description: form.description.trim(),
+        category: form.category.trim(),
+        votingPeriod: form.votingPeriod.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return voteEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
+    const onCastVote = () => runAction(async () => castVote({
+        proposalId: form.id.trim(),
+        voter: form.voter.trim(),
+        votePower: form.votePower.trim(),
+        inFavor: form.inFavor,
+    }));
+
+    const onExecute = () => runAction(async () => executeProposal({
+        id: form.id.trim(),
+        executor: form.executor.trim() || form.proposer.trim(),
+    }));
+
+    const onVeto = () => runAction(async () => vetoProposal({
+        id: form.id.trim(),
+        vetoer: form.vetoer.trim() || form.proposer.trim(),
+    }));
+
+    const onGetProposal = () => runAction(async () => getProposal(form.id.trim()));
+
+    const onList = () => runAction(async () => listProposals());
+
+    const onHasVoted = () => runAction(async () => {
+        const value = await hasVoted(form.id.trim(), form.voter.trim());
+        return { hasVoted: value };
     });
-
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return executeEntry(next.id);
-    });
-
-    const onList = () => runAction(async () => listIds());
 
     const onCount = () => runAction(async () => {
-        const value = await getCount();
+        const value = await getProposalCount();
         setCountValue(String(value));
         return { count: value };
     });
@@ -99,44 +93,78 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
-                <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
-                </p>
+                <p className="kicker">Stellar Soroban Project 32</p>
+                <h1>DAO Voting</h1>
+                <p className="subtitle">Create proposals, cast weighted votes, execute or veto governance decisions.</p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Proposal count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <h2>Create Proposal</h2>
+                <label htmlFor="id">Proposal ID (Symbol)</label>
+                <input id="id" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="proposer">Proposer Address</label>
+                <input id="proposer" name="proposer" value={form.proposer} onChange={setField} placeholder="G..." />
 
                 <label htmlFor="title">Title</label>
                 <input id="title" name="title" value={form.title} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="description">Description</label>
+                <textarea id="description" name="description" rows="3" value={form.description} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
-
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="votingPeriod">Voting Period (seconds)</label>
+                <input id="votingPeriod" name="votingPeriod" value={form.votingPeriod} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateProposal} disabled={isBusy}>Create Proposal</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Vote</h2>
+                <label htmlFor="voter">Voter Address</label>
+                <input id="voter" name="voter" value={form.voter} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="votePower">Vote Power (i128)</label>
+                <input id="votePower" name="votePower" value={form.votePower} onChange={setField} type="number" />
+
+                <label htmlFor="inFavor" style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>
+                    <input id="inFavor" name="inFavor" type="checkbox" checked={form.inFavor} onChange={setField} />
+                    Vote In Favor
+                </label>
+
+                <div className="actions">
+                    <button type="button" onClick={onCastVote} disabled={isBusy}>Cast Vote</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Governance Actions</h2>
+                <label htmlFor="executor">Executor Address (optional, defaults to proposer)</label>
+                <input id="executor" name="executor" value={form.executor} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="vetoer">Vetoer Address (optional, defaults to proposer)</label>
+                <input id="vetoer" name="vetoer" value={form.vetoer} onChange={setField} placeholder="G..." />
+
+                <div className="actions">
+                    <button type="button" onClick={onExecute} disabled={isBusy}>Execute Proposal</button>
+                    <button type="button" onClick={onVeto} disabled={isBusy}>Veto Proposal</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Read Operations</h2>
+                <div className="actions">
+                    <button type="button" onClick={onGetProposal} disabled={isBusy}>Get Proposal</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List Proposals</button>
+                    <button type="button" onClick={onHasVoted} disabled={isBusy}>Has Voted?</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
                 </div>
             </section>
 

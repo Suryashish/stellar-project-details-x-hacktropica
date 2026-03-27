@@ -11,6 +11,8 @@ const server = new rpc.Server(RPC_URL);
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
+const toBool = (value) => xdr.ScVal.scvBool(!!value);
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +91,57 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const composeEntry = async (payload) => {
+export const createChannel = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.creator) throw new Error("creator address is required");
 
-    return invokeWrite("compose_item", [
+    return invokeWrite("create_channel", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        new Address(payload.creator).toScVal(),
+        nativeToScVal(payload.channelName || ""),
+        nativeToScVal(payload.description || ""),
+        toBool(payload.isPublic),
     ]);
 };
 
-export const broadcastEntry = async (payload) => {
-    if (!payload?.id) throw new Error("id is required");
+export const joinChannel = async (channelId, member) => {
+    if (!channelId) throw new Error("channelId is required");
+    if (!member) throw new Error("member address is required");
 
-    return invokeWrite("broadcast_item", [
-        toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+    return invokeWrite("join_channel", [
+        toSymbol(channelId),
+        new Address(member).toScVal(),
     ]);
 };
 
-export const trackEntry = async (id) => {
+export const sendMemo = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.sender) throw new Error("sender address is required");
+
+    return invokeWrite("send_memo", [
+        toSymbol(payload.id),
+        new Address(payload.sender).toScVal(),
+        toSymbol(payload.channel),
+        nativeToScVal(payload.content || ""),
+        toU64(payload.timestamp),
+    ]);
+};
+
+export const getMemo = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("track_item", [toSymbol(id)]);
+    return invokeRead("get_memo", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const getChannel = async (id) => {
+    if (!id) throw new Error("id is required");
+    return invokeRead("get_channel", [toSymbol(id)]);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const listChannels = async () => {
+    return invokeRead("list_channels", []);
+};
+
+export const getChannelMessageCount = async (channelId) => {
+    if (!channelId) throw new Error("channelId is required");
+    return invokeRead("get_channel_message_count", [toSymbol(channelId)]);
 };

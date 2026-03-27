@@ -1,56 +1,32 @@
 import React, { useState } from "react";
-import { checkConnection, publishEntry, promoteEntry, reportEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 39,
-    title: "Sponsored Posts",
-    style: "feed-stream",
-    label: "post",
-    writeAction: "publish",
-    updateAction: "promote",
-    readAction: "report",
-};
-
-const nowTs = () => Math.floor(Date.now() / 1000);
-
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
+import { checkConnection, createAd, approveAd, recordView, pauseAd, resumeAd, getAd, listAds, getAdCount } from "../lib.js/stellar.js";
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "ad1",
+        advertiser: "",
+        publisher: "",
+        viewer: "",
+        title: "Summer Sale Campaign",
+        content: "Get 50% off all items this summer!",
+        targetAudience: "general",
+        budget: "10000",
+        costPerView: "10",
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
+    const [adCount, setAdCount] = useState("-");
 
     const setField = (event) => {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +42,87 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => publishEntry(payload()));
+    const onCreateAd = () => runAction(() => createAd({
+        id: form.id.trim(),
+        advertiser: form.advertiser.trim(),
+        title: form.title.trim(),
+        content: form.content.trim(),
+        targetAudience: form.targetAudience.trim(),
+        budget: form.budget.trim(),
+        costPerView: form.costPerView.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return promoteEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onApproveAd = () => runAction(() => approveAd(form.id.trim(), form.publisher.trim()));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return reportEntry(next.id);
-    });
+    const onRecordView = () => runAction(() => recordView(form.id.trim(), form.viewer.trim()));
 
-    const onList = () => runAction(async () => listIds());
+    const onPauseAd = () => runAction(() => pauseAd(form.id.trim(), form.advertiser.trim()));
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
+    const onResumeAd = () => runAction(() => resumeAd(form.id.trim(), form.advertiser.trim()));
+
+    const onGetAd = () => runAction(() => getAd(form.id.trim()));
+
+    const onListAds = () => runAction(() => listAds());
+
+    const onGetAdCount = () => runAction(async () => {
+        const value = await getAdCount();
+        setAdCount(String(value));
         return { count: value };
     });
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
-                <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
-                </p>
-                <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
+                <p className="kicker">Stellar Soroban Project 39</p>
+                <h1>Sponsored Posts</h1>
+                <p className="subtitle">Create ad campaigns, approve as publisher, track views and budget spend.</p>
+                <button type="button" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total ads: {adCount}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="adId">Ad ID</label>
+                <input id="adId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="advertiser">Advertiser Address</label>
+                <input id="advertiser" name="advertiser" value={form.advertiser} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
+                <label htmlFor="publisher">Publisher Address</label>
+                <input id="publisher" name="publisher" value={form.publisher} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="viewer">Viewer Address</label>
+                <input id="viewer" name="viewer" value={form.viewer} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="title">Ad Title</label>
                 <input id="title" name="title" value={form.title} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="content">Ad Content</label>
+                <textarea id="content" name="content" rows="3" value={form.content} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="targetAudience">Target Audience (Symbol)</label>
+                <input id="targetAudience" name="targetAudience" value={form.targetAudience} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="budget">Budget (i128)</label>
+                <input id="budget" name="budget" value={form.budget} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="costPerView">Cost Per View (i128)</label>
+                <input id="costPerView" name="costPerView" value={form.costPerView} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateAd} disabled={isBusy}>Create Ad</button>
+                    <button type="button" onClick={onApproveAd} disabled={isBusy}>Approve Ad</button>
+                    <button type="button" onClick={onRecordView} disabled={isBusy}>Record View</button>
+                    <button type="button" onClick={onPauseAd} disabled={isBusy}>Pause Ad</button>
+                    <button type="button" onClick={onResumeAd} disabled={isBusy}>Resume Ad</button>
+                    <button type="button" onClick={onGetAd} disabled={isBusy}>Get Ad</button>
+                    <button type="button" onClick={onListAds} disabled={isBusy}>List Ads</button>
+                    <button type="button" onClick={onGetAdCount} disabled={isBusy}>Ad Count</button>
                 </div>
             </section>
 

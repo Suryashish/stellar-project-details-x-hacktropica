@@ -7,29 +7,39 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct KnowledgeBaseContractItem {
-    pub owner: Address,
+pub struct Article {
+    pub author: Address,
+    pub last_editor: Address,
     pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
+    pub content: String,
+    pub category: Symbol,
+    pub tags: String,
+    pub version: u32,
+    pub upvotes: u32,
+    pub is_answer: bool,
+    pub is_archived: bool,
+    pub created_at: u64,
     pub updated_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum KnowledgeBaseContractDataKey {
+pub enum DataKey {
     IdList,
-    Item(Symbol),
+    Article(Symbol),
     Count,
+    Upvoted(Symbol, Address),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum KnowledgeBaseContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum ContractError {
+    NotFound = 1,
+    NotAuthorized = 2,
+    InvalidTitle = 3,
+    AlreadyUpvoted = 4,
+    AlreadyArchived = 5,
 }
 
 #[contract]
@@ -37,39 +47,12 @@ pub struct KnowledgeBaseContract;
 
 #[contractimpl]
 impl KnowledgeBaseContract {
-    fn count_key() -> KnowledgeBaseContractDataKey {
-        KnowledgeBaseContractDataKey::Count
-    }
-
-    fn ids_key() -> KnowledgeBaseContractDataKey {
-        KnowledgeBaseContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> KnowledgeBaseContractDataKey {
-        KnowledgeBaseContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, KnowledgeBaseContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, KnowledgeBaseContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage().instance().get(&DataKey::IdList).unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&DataKey::IdList, ids);
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +64,131 @@ impl KnowledgeBaseContract {
         false
     }
 
-    pub fn publish_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    pub fn create_article(
+        env: Env,
+        id: Symbol,
+        author: Address,
+        title: String,
+        content: String,
+        category: Symbol,
+        tags: String,
+    ) {
+        author.require_auth();
 
-        let item = KnowledgeBaseContractItem {
-            owner,
+        if title.len() == 0 {
+            panic_with_error!(&env, ContractError::InvalidTitle);
+        }
+
+        let now = env.ledger().timestamp();
+
+        let article = Article {
+            author: author.clone(),
+            last_editor: author,
             title,
-            notes,
-            state,
-            amount,
-            updated_at,
+            content,
+            category,
+            tags,
+            version: 1,
+            upvotes: 0,
+            is_answer: false,
+            is_archived: false,
+            created_at: now,
+            updated_at: now,
         };
 
-        let key = Self::item_key(&id);
+        let key = DataKey::Article(id.clone());
         let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &article);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
             if !exists {
-                Self::increment_count(&env);
+                let count: u32 = env.storage().instance().get(&DataKey::Count).unwrap_or(0);
+                env.storage().instance().set(&DataKey::Count, &(count + 1));
             }
         }
     }
 
-    pub fn search_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<KnowledgeBaseContractItem> = env.storage().instance().get(&key);
+    pub fn edit_article(env: Env, id: Symbol, editor: Address, new_content: String) {
+        editor.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        let key = DataKey::Article(id.clone());
+        let mut article: Article = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotFound));
+
+        if article.is_archived {
+            panic_with_error!(&env, ContractError::AlreadyArchived);
         }
+
+        let now = env.ledger().timestamp();
+        article.last_editor = editor;
+        article.content = new_content;
+        article.version += 1;
+        article.updated_at = now;
+
+        env.storage().instance().set(&key, &article);
     }
 
-    pub fn rate_item(env: Env, id: Symbol) -> Option<KnowledgeBaseContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn upvote_article(env: Env, id: Symbol, voter: Address) {
+        voter.require_auth();
+
+        let vote_key = DataKey::Upvoted(id.clone(), voter.clone());
+        if env.storage().instance().has(&vote_key) {
+            panic_with_error!(&env, ContractError::AlreadyUpvoted);
+        }
+
+        let key = DataKey::Article(id.clone());
+        let mut article: Article = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotFound));
+
+        article.upvotes += 1;
+        env.storage().instance().set(&key, &article);
+        env.storage().instance().set(&vote_key, &true);
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn mark_answer(env: Env, id: Symbol, author: Address) {
+        author.require_auth();
+
+        let key = DataKey::Article(id.clone());
+        let mut article: Article = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotFound));
+
+        if article.author != author {
+            panic_with_error!(&env, ContractError::NotAuthorized);
+        }
+
+        article.is_answer = true;
+        env.storage().instance().set(&key, &article);
+    }
+
+    pub fn archive_article(env: Env, id: Symbol, author: Address) {
+        author.require_auth();
+
+        let key = DataKey::Article(id.clone());
+        let mut article: Article = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotFound));
+
+        if article.author != author {
+            panic_with_error!(&env, ContractError::NotAuthorized);
+        }
+
+        article.is_archived = true;
+        let now = env.ledger().timestamp();
+        article.updated_at = now;
+        env.storage().instance().set(&key, &article);
+    }
+
+    pub fn get_article(env: Env, id: Symbol) -> Option<Article> {
+        env.storage().instance().get(&DataKey::Article(id))
+    }
+
+    pub fn list_articles(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_article_count(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::Count).unwrap_or(0)
     }
 }

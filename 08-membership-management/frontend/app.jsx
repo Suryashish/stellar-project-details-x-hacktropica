@@ -1,32 +1,23 @@
 import React, { useState } from "react";
-import { checkConnection, enrollEntry, updateEntry, revokeEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 8,
-    title: "Membership / User Management System",
-    style: "profile",
-    label: "member",
-    writeAction: "enroll",
-    updateAction: "update",
-    readAction: "revoke",
-};
+import { checkConnection, registerMember, upgradeTier, renewMembership, suspendMember, activateMember, getMember, listMembers, getMemberCount } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
+const oneYearFromNow = () => nowTs() + 365 * 24 * 60 * 60;
 
 const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
+    id: "mem1",
+    member: "",
+    admin: "",
+    name: "John Doe",
+    email: "john@example.com",
+    tier: "basic",
+    newTier: "silver",
+    joinedAt: String(nowTs()),
+    newExpiry: String(oneYearFromNow()),
 });
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
@@ -42,16 +33,6 @@ export default function App() {
         setForm((prev) => ({ ...prev, [name]: value }));
     };
 
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
-
     const runAction = async (action) => {
         setIsBusy(true);
         try {
@@ -66,32 +47,47 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => enrollEntry(payload()));
+    const onRegister = () => runAction(async () => registerMember({
+        id: form.id.trim(),
+        member: form.member.trim(),
+        name: form.name.trim(),
+        email: form.email.trim(),
+        tier: form.tier.trim(),
+        joinedAt: Number(form.joinedAt.trim() || nowTs()),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return updateEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onUpgradeTier = () => runAction(async () => upgradeTier({
+        id: form.id.trim(),
+        member: form.member.trim(),
+        newTier: form.newTier.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return revokeEntry(next.id);
-    });
+    const onRenew = () => runAction(async () => renewMembership({
+        id: form.id.trim(),
+        member: form.member.trim(),
+        newExpiry: Number(form.newExpiry.trim() || oneYearFromNow()),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onSuspend = () => runAction(async () => suspendMember({
+        id: form.id.trim(),
+        admin: form.admin.trim(),
+    }));
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
+    const onActivate = () => runAction(async () => activateMember({
+        id: form.id.trim(),
+        admin: form.admin.trim(),
+    }));
+
+    const onGetMember = () => runAction(async () => getMember(form.id.trim()));
+    const onListMembers = () => runAction(async () => listMembers());
+
+    const onGetCount = () => runAction(async () => {
+        const value = await getMemberCount();
         setCountValue(String(value));
         return { count: value };
     });
@@ -99,44 +95,72 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 8</p>
+                <h1>Membership Management System</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Register members, manage tiers, renew subscriptions, and handle suspensions.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total members: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
+                <h2>Member Registration</h2>
+
+                <label htmlFor="entryId">Member ID (Symbol)</label>
                 <input id="entryId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="member">Member Address</label>
+                <input id="member" name="member" value={form.member} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="name">Full Name</label>
+                <input id="name" name="name" value={form.name} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="email">Email</label>
+                <input id="email" name="email" value={form.email} onChange={setField} type="email" />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="tier">Tier (basic / silver / gold / platinum)</label>
+                <select id="tier" name="tier" value={form.tier} onChange={setField}>
+                    <option value="basic">Basic</option>
+                    <option value="silver">Silver</option>
+                    <option value="gold">Gold</option>
+                    <option value="platinum">Platinum</option>
+                </select>
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
-
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="joinedAt">Joined At (u64 timestamp)</label>
+                <input id="joinedAt" name="joinedAt" value={form.joinedAt} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onRegister} disabled={isBusy}>Register Member</button>
+                    <button type="button" onClick={onGetMember} disabled={isBusy}>Get Member</button>
+                    <button type="button" onClick={onListMembers} disabled={isBusy}>List Members</button>
+                    <button type="button" onClick={onGetCount} disabled={isBusy}>Get Count</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Membership Actions</h2>
+
+                <label htmlFor="newTier">New Tier</label>
+                <select id="newTier" name="newTier" value={form.newTier} onChange={setField}>
+                    <option value="basic">Basic</option>
+                    <option value="silver">Silver</option>
+                    <option value="gold">Gold</option>
+                    <option value="platinum">Platinum</option>
+                </select>
+
+                <label htmlFor="newExpiry">New Expiry (u64 timestamp)</label>
+                <input id="newExpiry" name="newExpiry" value={form.newExpiry} onChange={setField} type="number" />
+
+                <label htmlFor="admin">Admin Address (for suspend/activate)</label>
+                <input id="admin" name="admin" value={form.admin} onChange={setField} placeholder="G..." />
+
+                <div className="actions">
+                    <button type="button" onClick={onUpgradeTier} disabled={isBusy}>Upgrade Tier</button>
+                    <button type="button" onClick={onRenew} disabled={isBusy}>Renew Membership</button>
+                    <button type="button" onClick={onSuspend} disabled={isBusy}>Suspend Member</button>
+                    <button type="button" onClick={onActivate} disabled={isBusy}>Activate Member</button>
                 </div>
             </section>
 

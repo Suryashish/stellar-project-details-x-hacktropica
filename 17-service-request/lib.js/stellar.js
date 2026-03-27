@@ -10,7 +10,9 @@ const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
-const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
+const toStr = (value) => nativeToScVal(String(value || ""));
+const toAddr = (value) => new Address(value).toScVal();
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +91,68 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const requestEntry = async (payload) => {
+export const createRequest = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.requester) throw new Error("requester address is required");
 
-    return invokeWrite("request_item", [
+    return invokeWrite("create_request", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        toAddr(payload.requester),
+        toStr(payload.title),
+        toStr(payload.description),
+        toU32(payload.priority),
+        toSymbol(payload.category || "general"),
+        toI128(payload.budget),
     ]);
 };
 
-export const acceptEntry = async (payload) => {
+export const acceptRequest = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.provider) throw new Error("provider address is required");
 
-    return invokeWrite("accept_item", [
+    return invokeWrite("accept_request", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        toAddr(payload.provider),
     ]);
 };
 
-export const completeEntry = async (id) => {
+export const submitWork = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.provider) throw new Error("provider address is required");
+
+    return invokeWrite("submit_work", [
+        toSymbol(payload.id),
+        toAddr(payload.provider),
+        toStr(payload.workNotes),
+    ]);
+};
+
+export const approveWork = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.requester) throw new Error("requester address is required");
+
+    return invokeWrite("approve_work", [
+        toSymbol(payload.id),
+        toAddr(payload.requester),
+    ]);
+};
+
+export const rejectWork = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.requester) throw new Error("requester address is required");
+
+    return invokeWrite("reject_work", [
+        toSymbol(payload.id),
+        toAddr(payload.requester),
+        toStr(payload.reason),
+    ]);
+};
+
+export const getRequest = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("complete_item", [toSymbol(id)]);
+    return invokeRead("get_request", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
-};
-
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const listRequests = async () => {
+    return invokeRead("list_requests", []);
 };

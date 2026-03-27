@@ -1,37 +1,24 @@
 import React, { useState } from "react";
-import { checkConnection, listEntry, purchaseEntry, unlockEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 33,
-    title: "Pay-to-Unlock",
-    style: "premium-vault",
-    label: "content",
-    writeAction: "list",
-    updateAction: "purchase",
-    readAction: "unlock",
-};
-
-const nowTs = () => Math.floor(Date.now() / 1000);
-
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
+import { checkConnection, createContent, purchaseContent, hasAccess, updatePrice, withdrawEarnings, getContent, listContent, getContentCount } from "../lib.js/stellar.js";
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "content1",
+        creator: "",
+        title: "Advanced Soroban Patterns",
+        preview: "Learn advanced smart contract patterns...",
+        contentHash: "QmExampleHash123",
+        price: "1000",
+        buyer: "",
+        paymentAmount: "1000",
+        newPrice: "1500",
+        user: "",
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
@@ -41,16 +28,6 @@ export default function App() {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -71,27 +48,43 @@ export default function App() {
         return nextWalletState;
     });
 
-    const onWrite = () => runAction(async () => listEntry(payload()));
+    const onCreateContent = () => runAction(async () => createContent({
+        id: form.id.trim(),
+        creator: form.creator.trim(),
+        title: form.title.trim(),
+        preview: form.preview.trim(),
+        contentHash: form.contentHash.trim(),
+        price: form.price.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return purchaseEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
+    const onPurchase = () => runAction(async () => purchaseContent({
+        contentId: form.id.trim(),
+        buyer: form.buyer.trim(),
+        paymentAmount: form.paymentAmount.trim(),
+    }));
+
+    const onHasAccess = () => runAction(async () => {
+        const value = await hasAccess(form.id.trim(), form.user.trim() || form.buyer.trim());
+        return { hasAccess: value };
     });
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return unlockEntry(next.id);
-    });
+    const onUpdatePrice = () => runAction(async () => updatePrice({
+        id: form.id.trim(),
+        creator: form.creator.trim(),
+        newPrice: form.newPrice.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onWithdraw = () => runAction(async () => withdrawEarnings({
+        id: form.id.trim(),
+        creator: form.creator.trim(),
+    }));
+
+    const onGetContent = () => runAction(async () => getContent(form.id.trim()));
+
+    const onList = () => runAction(async () => listContent());
 
     const onCount = () => runAction(async () => {
-        const value = await getCount();
+        const value = await getContentCount();
         setCountValue(String(value));
         return { count: value };
     });
@@ -99,44 +92,73 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
-                <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
-                </p>
+                <p className="kicker">Stellar Soroban Project 33</p>
+                <h1>Pay-to-Unlock</h1>
+                <p className="subtitle">Publish premium content, accept payments, and manage access on-chain.</p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Content count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <h2>Create Content</h2>
+                <label htmlFor="id">Content ID (Symbol)</label>
+                <input id="id" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="creator">Creator Address</label>
+                <input id="creator" name="creator" value={form.creator} onChange={setField} placeholder="G..." />
 
                 <label htmlFor="title">Title</label>
                 <input id="title" name="title" value={form.title} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="preview">Preview Text</label>
+                <textarea id="preview" name="preview" rows="2" value={form.preview} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="contentHash">Content Hash</label>
+                <input id="contentHash" name="contentHash" value={form.contentHash} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
-
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="price">Price (i128)</label>
+                <input id="price" name="price" value={form.price} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateContent} disabled={isBusy}>Create Content</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Purchase / Access</h2>
+                <label htmlFor="buyer">Buyer Address</label>
+                <input id="buyer" name="buyer" value={form.buyer} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="paymentAmount">Payment Amount (i128)</label>
+                <input id="paymentAmount" name="paymentAmount" value={form.paymentAmount} onChange={setField} type="number" />
+
+                <label htmlFor="user">Check Access For (optional, defaults to buyer)</label>
+                <input id="user" name="user" value={form.user} onChange={setField} placeholder="G..." />
+
+                <div className="actions">
+                    <button type="button" onClick={onPurchase} disabled={isBusy}>Purchase</button>
+                    <button type="button" onClick={onHasAccess} disabled={isBusy}>Check Access</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Creator Actions</h2>
+                <label htmlFor="newPrice">New Price (i128)</label>
+                <input id="newPrice" name="newPrice" value={form.newPrice} onChange={setField} type="number" />
+
+                <div className="actions">
+                    <button type="button" onClick={onUpdatePrice} disabled={isBusy}>Update Price</button>
+                    <button type="button" onClick={onWithdraw} disabled={isBusy}>Withdraw Earnings</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Read Operations</h2>
+                <div className="actions">
+                    <button type="button" onClick={onGetContent} disabled={isBusy}>Get Content</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List Content</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
                 </div>
             </section>
 

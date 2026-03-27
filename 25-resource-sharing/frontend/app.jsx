@@ -1,56 +1,37 @@
 import React, { useState } from "react";
-import { checkConnection, listEntry, borrowEntry, returnEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 25,
-    title: "Resource Sharing Platform",
-    style: "sharing-gallery",
-    label: "resource",
-    writeAction: "list",
-    updateAction: "borrow",
-    readAction: "return",
-};
+import { checkConnection, listResource, borrowResource, returnResource, rateTransaction, getResource, listResources, getAvailableCount } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
-
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "res1",
+        owner: "",
+        name: "Power Drill",
+        description: "Cordless power drill, good condition",
+        category: "tools",
+        dailyRate: "50000000",
+        depositRequired: "200000000",
+        borrower: "",
+        startDate: String(nowTs()),
+        endDate: String(nowTs() + 86400 * 3),
+        conditionNotes: "Returned in good condition",
+        rating: "5",
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
+    const [availableCount, setAvailableCount] = useState("-");
 
     const setField = (event) => {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +47,116 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => listEntry(payload()));
+    const onListResource = () => runAction(async () =>
+        listResource({
+            id: form.id.trim(),
+            owner: form.owner.trim(),
+            name: form.name.trim(),
+            description: form.description.trim(),
+            category: form.category.trim(),
+            dailyRate: form.dailyRate.trim(),
+            depositRequired: form.depositRequired.trim(),
+        })
+    );
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return borrowEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onBorrow = () => runAction(async () =>
+        borrowResource({
+            id: form.id.trim(),
+            borrower: form.borrower.trim(),
+            startDate: form.startDate.trim(),
+            endDate: form.endDate.trim(),
+        })
+    );
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return returnEntry(next.id);
-    });
+    const onReturn = () => runAction(async () =>
+        returnResource({
+            id: form.id.trim(),
+            borrower: form.borrower.trim(),
+            conditionNotes: form.conditionNotes.trim(),
+        })
+    );
 
-    const onList = () => runAction(async () => listIds());
+    const onRate = () => runAction(async () =>
+        rateTransaction({
+            id: form.id.trim(),
+            rater: form.borrower.trim() || form.owner.trim(),
+            rating: form.rating.trim(),
+        })
+    );
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
-        return { count: value };
+    const onGetResource = () => runAction(async () => getResource(form.id.trim()));
+
+    const onListResources = () => runAction(async () => listResources());
+
+    const onGetAvailable = () => runAction(async () => {
+        const value = await getAvailableCount();
+        setAvailableCount(String(value));
+        return { available: value };
     });
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 25</p>
+                <h1>Resource Sharing Platform</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    List resources for lending, borrow and return items, and rate transactions.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Available resources: {availableCount}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="id">Resource ID (Symbol)</label>
+                <input id="id" name="id" value={form.id} onChange={setField} />
 
                 <label htmlFor="owner">Owner Address</label>
                 <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="name">Resource Name</label>
+                <input id="name" name="name" value={form.name} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="description">Description</label>
+                <input id="description" name="description" value={form.description} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} placeholder="tools/electronics/books" />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="dailyRate">Daily Rate (i128 stroops)</label>
+                <input id="dailyRate" name="dailyRate" value={form.dailyRate} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="depositRequired">Deposit Required (i128 stroops)</label>
+                <input id="depositRequired" name="depositRequired" value={form.depositRequired} onChange={setField} type="number" />
+
+                <label htmlFor="borrower">Borrower Address</label>
+                <input id="borrower" name="borrower" value={form.borrower} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="startDate">Start Date (u64 timestamp)</label>
+                <input id="startDate" name="startDate" value={form.startDate} onChange={setField} type="number" />
+
+                <label htmlFor="endDate">End Date (u64 timestamp)</label>
+                <input id="endDate" name="endDate" value={form.endDate} onChange={setField} type="number" />
+
+                <label htmlFor="conditionNotes">Condition Notes (for return)</label>
+                <input id="conditionNotes" name="conditionNotes" value={form.conditionNotes} onChange={setField} />
+
+                <label htmlFor="rating">Rating (1-5)</label>
+                <input id="rating" name="rating" value={form.rating} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onListResource} disabled={isBusy}>List Resource</button>
+                    <button type="button" onClick={onBorrow} disabled={isBusy}>Borrow</button>
+                    <button type="button" onClick={onReturn} disabled={isBusy}>Return</button>
+                    <button type="button" onClick={onRate} disabled={isBusy}>Rate</button>
+                    <button type="button" onClick={onGetResource} disabled={isBusy}>Get Resource</button>
+                    <button type="button" onClick={onListResources} disabled={isBusy}>List Resources</button>
+                    <button type="button" onClick={onGetAvailable} disabled={isBusy}>Available Count</button>
                 </div>
             </section>
 

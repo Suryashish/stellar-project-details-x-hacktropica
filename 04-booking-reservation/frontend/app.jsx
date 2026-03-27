@@ -1,32 +1,21 @@
 import React, { useState } from "react";
-import { checkConnection, bookEntry, confirmEntry, cancelEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 4,
-    title: "Booking & Reservation System",
-    style: "calendar",
-    label: "booking",
-    writeAction: "book",
-    updateAction: "confirm",
-    readAction: "cancel",
-};
+import { checkConnection, createSlot, bookSlot, cancelBooking, completeBooking, getSlot, listSlots, getSlotCount } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
 const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
+    id: "slot1",
+    provider: "",
+    customer: "",
+    serviceName: "Consultation",
+    date: String(nowTs()),
+    startTime: String(nowTs()),
+    endTime: String(nowTs() + 3600),
+    price: "1000",
 });
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
@@ -42,16 +31,6 @@ export default function App() {
         setForm((prev) => ({ ...prev, [name]: value }));
     };
 
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
-
     const runAction = async (action) => {
         setIsBusy(true);
         try {
@@ -66,32 +45,42 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => bookEntry(payload()));
+    const onCreateSlot = () => runAction(async () => createSlot({
+        id: form.id.trim(),
+        provider: form.provider.trim(),
+        serviceName: form.serviceName.trim(),
+        date: Number(form.date || nowTs()),
+        startTime: Number(form.startTime || nowTs()),
+        endTime: Number(form.endTime || nowTs() + 3600),
+        price: form.price.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return confirmEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onBookSlot = () => runAction(async () => bookSlot({
+        id: form.id.trim(),
+        customer: form.customer.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return cancelEntry(next.id);
-    });
+    const onCancelBooking = () => runAction(async () => cancelBooking({
+        id: form.id.trim(),
+        caller: form.customer.trim() || form.provider.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onCompleteBooking = () => runAction(async () => completeBooking({
+        id: form.id.trim(),
+        provider: form.provider.trim(),
+    }));
+
+    const onGetSlot = () => runAction(async () => getSlot(form.id.trim()));
+
+    const onList = () => runAction(async () => listSlots());
 
     const onCount = () => runAction(async () => {
-        const value = await getCount();
+        const value = await getSlotCount();
         setCountValue(String(value));
         return { count: value };
     });
@@ -99,44 +88,58 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 4</p>
+                <h1>Booking & Reservation System</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Create service time slots, book appointments, cancel or complete bookings on the Stellar blockchain.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total slots: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
+                <h2>Create Service Slot</h2>
+
+                <label htmlFor="entryId">Slot ID (Symbol, &lt;= 32 chars)</label>
                 <input id="entryId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="provider">Provider Address</label>
+                <input id="provider" name="provider" value={form.provider} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="serviceName">Service Name</label>
+                <input id="serviceName" name="serviceName" value={form.serviceName} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="date">Date (u64 timestamp)</label>
+                <input id="date" name="date" value={form.date} onChange={setField} type="number" />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="startTime">Start Time (u64 timestamp)</label>
+                <input id="startTime" name="startTime" value={form.startTime} onChange={setField} type="number" />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="endTime">End Time (u64 timestamp)</label>
+                <input id="endTime" name="endTime" value={form.endTime} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="price">Price (i128 stroops)</label>
+                <input id="price" name="price" value={form.price} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateSlot} disabled={isBusy}>Create Slot</button>
+                    <button type="button" onClick={onGetSlot} disabled={isBusy}>Get Slot</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List All Slots</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Booking Actions</h2>
+
+                <label htmlFor="customer">Customer Address</label>
+                <input id="customer" name="customer" value={form.customer} onChange={setField} placeholder="G..." />
+
+                <div className="actions">
+                    <button type="button" onClick={onBookSlot} disabled={isBusy}>Book Slot</button>
+                    <button type="button" onClick={onCancelBooking} disabled={isBusy}>Cancel Booking</button>
+                    <button type="button" onClick={onCompleteBooking} disabled={isBusy}>Complete Booking</button>
                 </div>
             </section>
 

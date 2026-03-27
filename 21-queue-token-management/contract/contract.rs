@@ -7,29 +7,38 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct QueueTokenManagementContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct Queue {
+    pub admin: Address,
+    pub queue_name: String,
+    pub max_capacity: u32,
+    pub next_token: u32,
+    pub current_serving: u32,
+    pub total_served: u32,
+    pub skipped_count: u32,
+    pub is_active: bool,
+    pub created_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum QueueTokenManagementContractDataKey {
+pub enum QueueDataKey {
     IdList,
     Item(Symbol),
-    Count,
+    Skipped(Symbol),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum QueueTokenManagementContractError {
-    InvalidTitle = 1,
+pub enum QueueError {
+    InvalidName = 1,
     InvalidTimestamp = 2,
+    NotFound = 3,
+    NotAdmin = 4,
+    QueueFull = 5,
+    QueueEmpty = 6,
+    AlreadyExists = 7,
+    QueueInactive = 8,
 }
 
 #[contract]
@@ -37,31 +46,16 @@ pub struct QueueTokenManagementContract;
 
 #[contractimpl]
 impl QueueTokenManagementContract {
-    fn count_key() -> QueueTokenManagementContractDataKey {
-        QueueTokenManagementContractDataKey::Count
+    fn ids_key() -> QueueDataKey {
+        QueueDataKey::IdList
     }
 
-    fn ids_key() -> QueueTokenManagementContractDataKey {
-        QueueTokenManagementContractDataKey::IdList
+    fn item_key(id: &Symbol) -> QueueDataKey {
+        QueueDataKey::Item(id.clone())
     }
 
-    fn item_key(id: &Symbol) -> QueueTokenManagementContractDataKey {
-        QueueTokenManagementContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, QueueTokenManagementContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, QueueTokenManagementContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn skipped_key(id: &Symbol) -> QueueDataKey {
+        QueueDataKey::Skipped(id.clone())
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
@@ -81,60 +75,155 @@ impl QueueTokenManagementContract {
         false
     }
 
-    pub fn issue_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    fn load_skipped(env: &Env, queue_id: &Symbol) -> Vec<u32> {
+        env.storage().instance().get(&Self::skipped_key(queue_id)).unwrap_or(Vec::new(env))
+    }
 
-        let item = QueueTokenManagementContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
-        };
+    fn save_skipped(env: &Env, queue_id: &Symbol, skipped: &Vec<u32>) {
+        env.storage().instance().set(&Self::skipped_key(queue_id), skipped);
+    }
+
+    fn is_skipped(skipped: &Vec<u32>, token: u32) -> bool {
+        for s in skipped.iter() {
+            if s == token {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn create_queue(env: Env, id: Symbol, admin: Address, queue_name: String, max_capacity: u32) {
+        admin.require_auth();
+
+        if queue_name.len() == 0 {
+            panic_with_error!(env, QueueError::InvalidName);
+        }
 
         let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
+        if env.storage().instance().has(&key) {
+            panic_with_error!(env, QueueError::AlreadyExists);
+        }
 
-        env.storage().instance().set(&key, &item);
+        let queue = Queue {
+            admin,
+            queue_name,
+            max_capacity,
+            next_token: 1,
+            current_serving: 0,
+            total_served: 0,
+            skipped_count: 0,
+            is_active: true,
+            created_at: env.ledger().timestamp(),
+        };
+
+        env.storage().instance().set(&key, &queue);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
+        }
+    }
+
+    pub fn take_token(env: Env, queue_id: Symbol, customer: Address) -> u32 {
+        customer.require_auth();
+
+        let key = Self::item_key(&queue_id);
+        let maybe_queue: Option<Queue> = env.storage().instance().get(&key);
+
+        if let Some(mut queue) = maybe_queue {
+            if !queue.is_active {
+                panic_with_error!(env, QueueError::QueueInactive);
             }
-        }
-    }
 
-    pub fn claim_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<QueueTokenManagementContractItem> = env.storage().instance().get(&key);
+            let waiting = queue.next_token - queue.current_serving - 1;
+            if waiting >= queue.max_capacity {
+                panic_with_error!(env, QueueError::QueueFull);
+            }
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+            let token = queue.next_token;
+            queue.next_token += 1;
+            env.storage().instance().set(&key, &queue);
+            token
         } else {
-            false
+            panic_with_error!(env, QueueError::NotFound);
         }
     }
 
-    pub fn process_item(env: Env, id: Symbol) -> Option<QueueTokenManagementContractItem> {
+    pub fn call_next(env: Env, queue_id: Symbol, admin: Address) -> u32 {
+        admin.require_auth();
+
+        let key = Self::item_key(&queue_id);
+        let maybe_queue: Option<Queue> = env.storage().instance().get(&key);
+
+        if let Some(mut queue) = maybe_queue {
+            if queue.admin != admin {
+                panic_with_error!(env, QueueError::NotAdmin);
+            }
+
+            let skipped = Self::load_skipped(&env, &queue_id);
+            let mut next = queue.current_serving + 1;
+
+            while next < queue.next_token && Self::is_skipped(&skipped, next) {
+                next += 1;
+            }
+
+            if next >= queue.next_token {
+                panic_with_error!(env, QueueError::QueueEmpty);
+            }
+
+            queue.current_serving = next;
+            queue.total_served += 1;
+            env.storage().instance().set(&key, &queue);
+            next
+        } else {
+            panic_with_error!(env, QueueError::NotFound);
+        }
+    }
+
+    pub fn skip_token(env: Env, queue_id: Symbol, admin: Address, token_number: u32) {
+        admin.require_auth();
+
+        let key = Self::item_key(&queue_id);
+        let maybe_queue: Option<Queue> = env.storage().instance().get(&key);
+
+        if let Some(mut queue) = maybe_queue {
+            if queue.admin != admin {
+                panic_with_error!(env, QueueError::NotAdmin);
+            }
+
+            let mut skipped = Self::load_skipped(&env, &queue_id);
+            if !Self::is_skipped(&skipped, token_number) {
+                skipped.push_back(token_number);
+                Self::save_skipped(&env, &queue_id, &skipped);
+                queue.skipped_count += 1;
+                env.storage().instance().set(&key, &queue);
+            }
+        } else {
+            panic_with_error!(env, QueueError::NotFound);
+        }
+    }
+
+    pub fn get_queue(env: Env, id: Symbol) -> Option<Queue> {
         env.storage().instance().get(&Self::item_key(&id))
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn list_queues(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_current_wait(env: Env, queue_id: Symbol) -> u32 {
+        let key = Self::item_key(&queue_id);
+        let maybe_queue: Option<Queue> = env.storage().instance().get(&key);
+
+        if let Some(queue) = maybe_queue {
+            if queue.next_token <= queue.current_serving + 1 {
+                0
+            } else {
+                queue.next_token - queue.current_serving - 1
+            }
+        } else {
+            0
+        }
     }
 }

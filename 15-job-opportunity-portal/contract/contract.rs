@@ -7,29 +7,48 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct JobOpportunityPortalContractItem {
-    pub owner: Address,
+pub struct Job {
+    pub employer: Address,
     pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+    pub description: String,
+    pub location: String,
+    pub salary_min: i128,
+    pub salary_max: i128,
+    pub job_type: Symbol,
+    pub applicant_count: u32,
+    pub is_open: bool,
+    pub posted_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum JobOpportunityPortalContractDataKey {
-    IdList,
-    Item(Symbol),
-    Count,
+pub struct Application {
+    pub cover_letter: String,
+    pub applied_at: u64,
+    pub is_hired: bool,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKey {
+    JobList,
+    Job(Symbol),
+    Application(Symbol, Address),
+    ApplicationCount(Symbol),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum JobOpportunityPortalContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum JobPortalError {
+    JobNotFound = 1,
+    JobAlreadyExists = 2,
+    JobClosed = 3,
+    NotEmployer = 4,
+    InvalidTitle = 5,
+    InvalidSalaryRange = 6,
+    AlreadyApplied = 7,
+    ApplicationNotFound = 8,
 }
 
 #[contract]
@@ -37,39 +56,15 @@ pub struct JobOpportunityPortalContract;
 
 #[contractimpl]
 impl JobOpportunityPortalContract {
-    fn count_key() -> JobOpportunityPortalContractDataKey {
-        JobOpportunityPortalContractDataKey::Count
-    }
-
-    fn ids_key() -> JobOpportunityPortalContractDataKey {
-        JobOpportunityPortalContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> JobOpportunityPortalContractDataKey {
-        JobOpportunityPortalContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, JobOpportunityPortalContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, JobOpportunityPortalContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage()
+            .instance()
+            .get(&DataKey::JobList)
+            .unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&DataKey::JobList, ids);
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +76,156 @@ impl JobOpportunityPortalContract {
         false
     }
 
-    pub fn post_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    pub fn post_job(
+        env: Env,
+        id: Symbol,
+        employer: Address,
+        title: String,
+        description: String,
+        location: String,
+        salary_min: i128,
+        salary_max: i128,
+        job_type: Symbol,
+    ) {
+        employer.require_auth();
 
-        let item = JobOpportunityPortalContractItem {
-            owner,
+        if title.len() == 0 {
+            panic_with_error!(env, JobPortalError::InvalidTitle);
+        }
+        if salary_min > salary_max {
+            panic_with_error!(env, JobPortalError::InvalidSalaryRange);
+        }
+
+        let key = DataKey::Job(id.clone());
+        if env.storage().instance().has(&key) {
+            panic_with_error!(env, JobPortalError::JobAlreadyExists);
+        }
+
+        let job = Job {
+            employer,
             title,
-            notes,
-            state,
-            amount,
-            updated_at,
+            description,
+            location,
+            salary_min,
+            salary_max,
+            job_type,
+            applicant_count: 0,
+            is_open: true,
+            posted_at: env.ledger().timestamp(),
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &job);
+        env.storage()
+            .instance()
+            .set(&DataKey::ApplicationCount(id.clone()), &0u32);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
-            }
         }
     }
 
-    pub fn apply_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<JobOpportunityPortalContractItem> = env.storage().instance().get(&key);
+    pub fn apply_job(
+        env: Env,
+        job_id: Symbol,
+        applicant: Address,
+        cover_letter: String,
+    ) {
+        applicant.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        let key = DataKey::Job(job_id.clone());
+        let mut job: Job = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(env, JobPortalError::JobNotFound));
+
+        if !job.is_open {
+            panic_with_error!(env, JobPortalError::JobClosed);
         }
+
+        let app_key = DataKey::Application(job_id.clone(), applicant);
+        if env.storage().instance().has(&app_key) {
+            panic_with_error!(env, JobPortalError::AlreadyApplied);
+        }
+
+        let application = Application {
+            cover_letter,
+            applied_at: env.ledger().timestamp(),
+            is_hired: false,
+        };
+
+        env.storage().instance().set(&app_key, &application);
+
+        job.applicant_count += 1;
+        env.storage().instance().set(&key, &job);
+
+        let count_key = DataKey::ApplicationCount(job_id);
+        let count: u32 = env.storage().instance().get(&count_key).unwrap_or(0);
+        env.storage().instance().set(&count_key, &(count + 1));
     }
 
-    pub fn hire_item(env: Env, id: Symbol) -> Option<JobOpportunityPortalContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn close_job(env: Env, id: Symbol, employer: Address) {
+        employer.require_auth();
+
+        let key = DataKey::Job(id.clone());
+        let mut job: Job = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(env, JobPortalError::JobNotFound));
+
+        if job.employer != employer {
+            panic_with_error!(env, JobPortalError::NotEmployer);
+        }
+
+        job.is_open = false;
+        env.storage().instance().set(&key, &job);
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn hire_applicant(
+        env: Env,
+        job_id: Symbol,
+        employer: Address,
+        applicant: Address,
+    ) {
+        employer.require_auth();
+
+        let key = DataKey::Job(job_id.clone());
+        let job: Job = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(env, JobPortalError::JobNotFound));
+
+        if job.employer != employer {
+            panic_with_error!(env, JobPortalError::NotEmployer);
+        }
+
+        let app_key = DataKey::Application(job_id, applicant);
+        let mut application: Application = env
+            .storage()
+            .instance()
+            .get(&app_key)
+            .unwrap_or_else(|| panic_with_error!(env, JobPortalError::ApplicationNotFound));
+
+        application.is_hired = true;
+        env.storage().instance().set(&app_key, &application);
+    }
+
+    pub fn get_job(env: Env, id: Symbol) -> Option<Job> {
+        env.storage().instance().get(&DataKey::Job(id))
+    }
+
+    pub fn list_jobs(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_application_count(env: Env, job_id: Symbol) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ApplicationCount(job_id))
+            .unwrap_or(0)
     }
 }

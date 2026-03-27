@@ -9,8 +9,8 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(value, { type: "u32" });
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +89,64 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const postEntry = async (payload) => {
+export const postNotice = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.author) throw new Error("author address is required");
 
-    return invokeWrite("post_item", [
+    return invokeWrite("post_notice", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
+        new Address(payload.author).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.content || ""),
+        toSymbol(payload.category || "general"),
+        toU32(Number(payload.priority) || 0),
+        toU64(payload.expiresAt),
     ]);
 };
 
-export const browseEntry = async (payload) => {
+export const editNotice = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.author) throw new Error("author address is required");
 
-    return invokeWrite("browse_item", [
+    return invokeWrite("edit_notice", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.author).toScVal(),
+        nativeToScVal(payload.title || ""),
+        nativeToScVal(payload.content || ""),
+        toSymbol(payload.category || "general"),
+        toU32(Number(payload.priority) || 0),
     ]);
 };
 
-export const removeEntry = async (id) => {
+export const removeNotice = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.author) throw new Error("author address is required");
+
+    return invokeWrite("remove_notice", [
+        toSymbol(payload.id),
+        new Address(payload.author).toScVal(),
+    ]);
+};
+
+export const pinNotice = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.author) throw new Error("author address is required");
+
+    return invokeWrite("pin_notice", [
+        toSymbol(payload.id),
+        new Address(payload.author).toScVal(),
+    ]);
+};
+
+export const getNotice = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("remove_item", [toSymbol(id)]);
+    return invokeRead("get_notice", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listNotices = async () => {
+    return invokeRead("list_notices", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getNoticeCount = async () => {
+    return invokeRead("get_notice_count", []);
 };

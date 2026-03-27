@@ -7,29 +7,40 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct ComplaintReportingContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct Complaint {
+    pub reporter: Address,
+    pub assignee: Address,
+    pub has_assignee: bool,
+    pub subject: String,
+    pub description: String,
+    pub category: Symbol,
+    pub severity: u32,
+    pub status: Symbol,
+    pub resolution: String,
+    pub filed_at: u64,
+    pub resolved_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum ComplaintReportingContractDataKey {
+pub enum ComplaintDataKey {
     IdList,
-    Item(Symbol),
+    Complaint(Symbol),
     Count,
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum ComplaintReportingContractError {
-    InvalidTitle = 1,
+pub enum ComplaintError {
+    InvalidSubject = 1,
     InvalidTimestamp = 2,
+    NotFound = 3,
+    AlreadyExists = 4,
+    Unauthorized = 5,
+    AlreadyResolved = 6,
+    NotAssigned = 7,
+    MaxSeverity = 8,
 }
 
 #[contract]
@@ -37,104 +48,156 @@ pub struct ComplaintReportingContract;
 
 #[contractimpl]
 impl ComplaintReportingContract {
-    fn count_key() -> ComplaintReportingContractDataKey {
-        ComplaintReportingContractDataKey::Count
-    }
-
-    fn ids_key() -> ComplaintReportingContractDataKey {
-        ComplaintReportingContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> ComplaintReportingContractDataKey {
-        ComplaintReportingContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, ComplaintReportingContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, ComplaintReportingContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn complaint_key(id: &Symbol) -> ComplaintDataKey {
+        ComplaintDataKey::Complaint(id.clone())
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage().instance().get(&ComplaintDataKey::IdList).unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&ComplaintDataKey::IdList, ids);
     }
 
-    fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
-        for current in ids.iter() {
-            if current == id.clone() {
-                return true;
-            }
+    pub fn file_complaint(
+        env: Env,
+        id: Symbol,
+        reporter: Address,
+        subject: String,
+        description: String,
+        category: Symbol,
+        severity: u32,
+    ) {
+        reporter.require_auth();
+
+        if subject.len() == 0 {
+            panic_with_error!(&env, ComplaintError::InvalidSubject);
         }
-        false
-    }
 
-    pub fn submit_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+        let key = Self::complaint_key(&id);
+        if env.storage().instance().has(&key) {
+            panic_with_error!(&env, ComplaintError::AlreadyExists);
+        }
 
-        let item = ComplaintReportingContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+        let open_status = Symbol::new(&env, "open");
+        let empty_resolution = String::from_str(&env, "");
+        let filed_at = env.ledger().timestamp();
+
+        let complaint = Complaint {
+            reporter: reporter.clone(),
+            assignee: reporter,
+            has_assignee: false,
+            subject,
+            description,
+            category,
+            severity,
+            status: open_status,
+            resolution: empty_resolution,
+            filed_at,
+            resolved_at: 0,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &complaint);
 
         let mut ids = Self::load_ids(&env);
-        if !Self::has_id(&ids, &id) {
-            ids.push_back(id);
-            Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
+        ids.push_back(id);
+        Self::save_ids(&env, &ids);
+
+        let count: u32 = env.storage().instance().get(&ComplaintDataKey::Count).unwrap_or(0);
+        env.storage().instance().set(&ComplaintDataKey::Count, &(count + 1));
+    }
+
+    pub fn assign_complaint(env: Env, id: Symbol, admin: Address, assignee: Address) {
+        admin.require_auth();
+
+        let key = Self::complaint_key(&id);
+        let maybe: Option<Complaint> = env.storage().instance().get(&key);
+
+        if let Some(mut complaint) = maybe {
+            let resolved = Symbol::new(&env, "resolved");
+            if complaint.status == resolved {
+                panic_with_error!(&env, ComplaintError::AlreadyResolved);
             }
-        }
-    }
 
-    pub fn track_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<ComplaintReportingContractItem> = env.storage().instance().get(&key);
+            let assigned = Symbol::new(&env, "assigned");
+            complaint.assignee = assignee;
+            complaint.has_assignee = true;
+            complaint.status = assigned;
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+            env.storage().instance().set(&key, &complaint);
         } else {
-            false
+            panic_with_error!(&env, ComplaintError::NotFound);
         }
     }
 
-    pub fn resolve_item(env: Env, id: Symbol) -> Option<ComplaintReportingContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn resolve_complaint(env: Env, id: Symbol, handler: Address, resolution_notes: String) {
+        handler.require_auth();
+
+        let key = Self::complaint_key(&id);
+        let maybe: Option<Complaint> = env.storage().instance().get(&key);
+
+        if let Some(mut complaint) = maybe {
+            let resolved_status = Symbol::new(&env, "resolved");
+            if complaint.status == resolved_status {
+                panic_with_error!(&env, ComplaintError::AlreadyResolved);
+            }
+            if !complaint.has_assignee {
+                panic_with_error!(&env, ComplaintError::NotAssigned);
+            }
+            if complaint.assignee != handler {
+                panic_with_error!(&env, ComplaintError::Unauthorized);
+            }
+
+            complaint.status = resolved_status;
+            complaint.resolution = resolution_notes;
+            complaint.resolved_at = env.ledger().timestamp();
+
+            env.storage().instance().set(&key, &complaint);
+        } else {
+            panic_with_error!(&env, ComplaintError::NotFound);
+        }
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn escalate_complaint(env: Env, id: Symbol, reporter: Address) {
+        reporter.require_auth();
+
+        let key = Self::complaint_key(&id);
+        let maybe: Option<Complaint> = env.storage().instance().get(&key);
+
+        if let Some(mut complaint) = maybe {
+            if complaint.reporter != reporter {
+                panic_with_error!(&env, ComplaintError::Unauthorized);
+            }
+
+            let resolved = Symbol::new(&env, "resolved");
+            if complaint.status == resolved {
+                panic_with_error!(&env, ComplaintError::AlreadyResolved);
+            }
+
+            if complaint.severity >= 5 {
+                panic_with_error!(&env, ComplaintError::MaxSeverity);
+            }
+
+            let escalated = Symbol::new(&env, "escalated");
+            complaint.severity += 1;
+            complaint.status = escalated;
+
+            env.storage().instance().set(&key, &complaint);
+        } else {
+            panic_with_error!(&env, ComplaintError::NotFound);
+        }
+    }
+
+    pub fn get_complaint(env: Env, id: Symbol) -> Option<Complaint> {
+        env.storage().instance().get(&Self::complaint_key(&id))
+    }
+
+    pub fn list_complaints(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_complaint_count(env: Env) -> u32 {
+        env.storage().instance().get(&ComplaintDataKey::Count).unwrap_or(0)
     }
 }

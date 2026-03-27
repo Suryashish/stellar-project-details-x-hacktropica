@@ -9,7 +9,7 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
 
 const requireConfig = () => {
@@ -89,41 +89,59 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const issueEntry = async (payload) => {
+export const createQueue = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.admin) throw new Error("admin address is required");
 
-    return invokeWrite("issue_item", [
+    return invokeWrite("create_queue", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        new Address(payload.admin).toScVal(),
+        nativeToScVal(payload.queueName || ""),
+        toU32(payload.maxCapacity),
     ]);
 };
 
-export const claimEntry = async (payload) => {
-    if (!payload?.id) throw new Error("id is required");
+export const takeToken = async (payload) => {
+    if (!payload?.queueId) throw new Error("queueId is required");
+    if (!payload?.customer) throw new Error("customer address is required");
 
-    return invokeWrite("claim_item", [
-        toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+    return invokeWrite("take_token", [
+        toSymbol(payload.queueId),
+        new Address(payload.customer).toScVal(),
     ]);
 };
 
-export const processEntry = async (id) => {
+export const callNext = async (payload) => {
+    if (!payload?.queueId) throw new Error("queueId is required");
+    if (!payload?.admin) throw new Error("admin address is required");
+
+    return invokeWrite("call_next", [
+        toSymbol(payload.queueId),
+        new Address(payload.admin).toScVal(),
+    ]);
+};
+
+export const skipToken = async (payload) => {
+    if (!payload?.queueId) throw new Error("queueId is required");
+    if (!payload?.admin) throw new Error("admin address is required");
+
+    return invokeWrite("skip_token", [
+        toSymbol(payload.queueId),
+        new Address(payload.admin).toScVal(),
+        toU32(payload.tokenNumber),
+    ]);
+};
+
+export const getQueue = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("process_item", [toSymbol(id)]);
+    return invokeRead("get_queue", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listQueues = async () => {
+    return invokeRead("list_queues", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getCurrentWait = async (queueId) => {
+    if (!queueId) throw new Error("queueId is required");
+    return invokeRead("get_current_wait", [toSymbol(queueId)]);
 };

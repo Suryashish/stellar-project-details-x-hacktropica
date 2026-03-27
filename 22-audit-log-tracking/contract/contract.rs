@@ -7,29 +7,36 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct AuditLogTrackingContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct AuditEntry {
+    pub actor: Address,
+    pub action_type: Symbol,
+    pub target: String,
+    pub description: String,
+    pub severity: u32,
+    pub is_flagged: bool,
+    pub flag_reason: String,
+    pub access_type: Symbol,
+    pub logged_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum AuditLogTrackingContractDataKey {
+pub enum AuditDataKey {
     IdList,
     Item(Symbol),
     Count,
+    FlaggedCount,
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum AuditLogTrackingContractError {
-    InvalidTitle = 1,
+pub enum AuditError {
+    InvalidDescription = 1,
     InvalidTimestamp = 2,
+    NotFound = 3,
+    AlreadyFlagged = 4,
+    InvalidSeverity = 5,
 }
 
 #[contract]
@@ -37,31 +44,20 @@ pub struct AuditLogTrackingContract;
 
 #[contractimpl]
 impl AuditLogTrackingContract {
-    fn count_key() -> AuditLogTrackingContractDataKey {
-        AuditLogTrackingContractDataKey::Count
+    fn ids_key() -> AuditDataKey {
+        AuditDataKey::IdList
     }
 
-    fn ids_key() -> AuditLogTrackingContractDataKey {
-        AuditLogTrackingContractDataKey::IdList
+    fn item_key(id: &Symbol) -> AuditDataKey {
+        AuditDataKey::Item(id.clone())
     }
 
-    fn item_key(id: &Symbol) -> AuditLogTrackingContractDataKey {
-        AuditLogTrackingContractDataKey::Item(id.clone())
+    fn count_key() -> AuditDataKey {
+        AuditDataKey::Count
     }
 
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, AuditLogTrackingContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, AuditLogTrackingContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn flagged_count_key() -> AuditDataKey {
+        AuditDataKey::FlaggedCount
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
@@ -81,60 +77,136 @@ impl AuditLogTrackingContract {
         false
     }
 
-    pub fn record_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    fn increment_count(env: &Env) {
+        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
+        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    }
 
-        let item = AuditLogTrackingContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
-        };
+    fn increment_flagged(env: &Env) {
+        let count: u32 = env.storage().instance().get(&Self::flagged_count_key()).unwrap_or(0);
+        env.storage().instance().set(&Self::flagged_count_key(), &(count + 1));
+    }
 
-        let key = Self::item_key(&id);
+    fn store_entry(env: &Env, id: &Symbol, entry: &AuditEntry) {
+        let key = Self::item_key(id);
         let exists = env.storage().instance().has(&key);
+        env.storage().instance().set(&key, entry);
 
-        env.storage().instance().set(&key, &item);
-
-        let mut ids = Self::load_ids(&env);
-        if !Self::has_id(&ids, &id) {
-            ids.push_back(id);
-            Self::save_ids(&env, &ids);
+        let mut ids = Self::load_ids(env);
+        if !Self::has_id(&ids, id) {
+            ids.push_back(id.clone());
+            Self::save_ids(env, &ids);
             if !exists {
-                Self::increment_count(&env);
+                Self::increment_count(env);
             }
         }
     }
 
-    pub fn query_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<AuditLogTrackingContractItem> = env.storage().instance().get(&key);
+    pub fn log_action(
+        env: Env,
+        id: Symbol,
+        actor: Address,
+        action_type: Symbol,
+        target: String,
+        description: String,
+        severity: u32,
+        timestamp: u64,
+    ) {
+        actor.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+        if description.len() == 0 {
+            panic_with_error!(env, AuditError::InvalidDescription);
+        }
+        if timestamp == 0 {
+            panic_with_error!(env, AuditError::InvalidTimestamp);
+        }
+        if severity > 5 {
+            panic_with_error!(env, AuditError::InvalidSeverity);
+        }
+
+        let none_sym = Symbol::new(&env, "none");
+
+        let entry = AuditEntry {
+            actor,
+            action_type,
+            target,
+            description,
+            severity,
+            is_flagged: false,
+            flag_reason: String::from_str(&env, ""),
+            access_type: none_sym,
+            logged_at: timestamp,
+        };
+
+        Self::store_entry(&env, &id, &entry);
+    }
+
+    pub fn log_access(
+        env: Env,
+        id: Symbol,
+        accessor: Address,
+        resource: String,
+        access_type: Symbol,
+        timestamp: u64,
+    ) {
+        accessor.require_auth();
+
+        if resource.len() == 0 {
+            panic_with_error!(env, AuditError::InvalidDescription);
+        }
+        if timestamp == 0 {
+            panic_with_error!(env, AuditError::InvalidTimestamp);
+        }
+
+        let access_sym = Symbol::new(&env, "access");
+
+        let entry = AuditEntry {
+            actor: accessor,
+            action_type: access_sym,
+            target: resource,
+            description: String::from_str(&env, "Access log"),
+            severity: 1,
+            is_flagged: false,
+            flag_reason: String::from_str(&env, ""),
+            access_type,
+            logged_at: timestamp,
+        };
+
+        Self::store_entry(&env, &id, &entry);
+    }
+
+    pub fn flag_entry(env: Env, id: Symbol, auditor: Address, reason: String) {
+        auditor.require_auth();
+
+        let key = Self::item_key(&id);
+        let maybe_entry: Option<AuditEntry> = env.storage().instance().get(&key);
+
+        if let Some(mut entry) = maybe_entry {
+            if entry.is_flagged {
+                panic_with_error!(env, AuditError::AlreadyFlagged);
+            }
+            entry.is_flagged = true;
+            entry.flag_reason = reason;
+            env.storage().instance().set(&key, &entry);
+            Self::increment_flagged(&env);
         } else {
-            false
+            panic_with_error!(env, AuditError::NotFound);
         }
     }
 
-    pub fn verify_item(env: Env, id: Symbol) -> Option<AuditLogTrackingContractItem> {
+    pub fn get_entry(env: Env, id: Symbol) -> Option<AuditEntry> {
         env.storage().instance().get(&Self::item_key(&id))
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn list_entries(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
+    pub fn get_entry_count(env: Env) -> u32 {
         env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    }
+
+    pub fn get_flagged_count(env: Env) -> u32 {
+        env.storage().instance().get(&Self::flagged_count_key()).unwrap_or(0)
     }
 }

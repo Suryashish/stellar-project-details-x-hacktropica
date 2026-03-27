@@ -9,8 +9,9 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
-const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
+const toStr = (value) => nativeToScVal(String(value || ""));
+const toAddr = (value) => new Address(value).toScVal();
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +90,72 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const registerEntry = async (payload) => {
+export const createListing = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
     if (!payload?.owner) throw new Error("owner address is required");
 
-    return invokeWrite("register_item", [
+    return invokeWrite("create_listing", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        toAddr(payload.owner),
+        toStr(payload.name),
+        toSymbol(payload.category || "general"),
+        toStr(payload.description),
+        toStr(payload.contact),
+        toStr(payload.website),
+        toStr(payload.location),
     ]);
 };
 
-export const searchEntry = async (payload) => {
+export const updateListing = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
 
-    return invokeWrite("search_item", [
+    return invokeWrite("update_listing", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        toAddr(payload.owner),
+        toStr(payload.name),
+        toStr(payload.description),
+        toStr(payload.contact),
+        toStr(payload.website),
     ]);
 };
 
-export const updateEntry = async (id) => {
+export const verifyListing = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.verifier) throw new Error("verifier address is required");
+
+    return invokeWrite("verify_listing", [
+        toSymbol(payload.id),
+        toAddr(payload.verifier),
+    ]);
+};
+
+export const deactivateListing = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
+
+    return invokeWrite("deactivate_listing", [
+        toSymbol(payload.id),
+        toAddr(payload.owner),
+    ]);
+};
+
+export const rateListing = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.rater) throw new Error("rater address is required");
+
+    return invokeWrite("rate_listing", [
+        toSymbol(payload.id),
+        toAddr(payload.rater),
+        toU32(payload.rating),
+    ]);
+};
+
+export const getListing = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("update_item", [toSymbol(id)]);
+    return invokeRead("get_listing", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
-};
-
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const listAll = async () => {
+    return invokeRead("list_all", []);
 };

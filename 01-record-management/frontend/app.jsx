@@ -1,32 +1,21 @@
 import React, { useState } from "react";
-import { checkConnection, createEntry, updateEntry, retrieveEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 1,
-    title: "Record Management System",
-    style: "minimal",
-    label: "record",
-    writeAction: "create",
-    updateAction: "update",
-    readAction: "retrieve",
-};
+import { checkConnection, createRecord, updateRecord, archiveRecord, getRecord, listRecords, getRecordsByCategory, getCount } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
 const initialForm = () => ({
-    id: `${meta.label}1`,
+    id: "rec1",
     owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
+    title: "Sample Record",
+    category: "general",
+    description: "A new record entry",
+    createdAt: String(nowTs()),
     updatedAt: String(nowTs()),
-    notes: "Created from frontend",
+    filterCategory: "general",
 });
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
@@ -42,16 +31,6 @@ export default function App() {
         setForm((prev) => ({ ...prev, [name]: value }));
     };
 
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
-
     const runAction = async (action) => {
         setIsBusy(true);
         try {
@@ -66,29 +45,39 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => createEntry(payload()));
+    const onCreate = () => runAction(async () => createRecord({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        title: form.title.trim(),
+        category: form.category.trim(),
+        description: form.description.trim(),
+        createdAt: Number(form.createdAt || nowTs()),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return updateEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onUpdate = () => runAction(async () => updateRecord({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        title: form.title.trim(),
+        category: form.category.trim(),
+        description: form.description.trim(),
+        updatedAt: Number(form.updatedAt || nowTs()),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return retrieveEntry(next.id);
-    });
+    const onArchive = () => runAction(async () => archiveRecord({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onGet = () => runAction(async () => getRecord(form.id.trim()));
+
+    const onList = () => runAction(async () => listRecords());
+
+    const onFilterByCategory = () => runAction(async () => getRecordsByCategory(form.filterCategory.trim()));
 
     const onCount = () => runAction(async () => {
         const value = await getCount();
@@ -99,18 +88,20 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 1</p>
+                <h1>Record Management System</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Create, update, archive, and search records by category on the Stellar blockchain.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total records: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
+                <h2>Record Details</h2>
+
+                <label htmlFor="entryId">Record ID (Symbol, &lt;= 32 chars)</label>
                 <input id="entryId" name="id" value={form.id} onChange={setField} />
 
                 <label htmlFor="owner">Owner Address</label>
@@ -119,24 +110,34 @@ export default function App() {
                 <label htmlFor="title">Title</label>
                 <input id="title" name="title" value={form.title} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} placeholder="general, finance, legal..." />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="description">Description</label>
+                <textarea id="description" name="description" rows="4" value={form.description} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
+                <label htmlFor="createdAt">Created At (u64 timestamp)</label>
+                <input id="createdAt" name="createdAt" value={form.createdAt} onChange={setField} type="number" />
+
+                <label htmlFor="updatedAt">Updated At (u64 timestamp)</label>
                 <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
-
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreate} disabled={isBusy}>Create Record</button>
+                    <button type="button" onClick={onUpdate} disabled={isBusy}>Update Record</button>
+                    <button type="button" onClick={onArchive} disabled={isBusy}>Archive Record</button>
+                    <button type="button" onClick={onGet} disabled={isBusy}>Get Record</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List All Records</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Filter by Category</h2>
+                <label htmlFor="filterCategory">Category</label>
+                <input id="filterCategory" name="filterCategory" value={form.filterCategory} onChange={setField} placeholder="general" />
+                <div className="actions">
+                    <button type="button" onClick={onFilterByCategory} disabled={isBusy}>Search by Category</button>
                 </div>
             </section>
 

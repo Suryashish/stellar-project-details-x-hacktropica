@@ -7,29 +7,35 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct DashboardAnalyticsContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
+pub struct Metric {
+    pub reporter: Address,
+    pub metric_name: String,
+    pub value: i128,
+    pub category: Symbol,
+    pub event_type: Symbol,
+    pub description: String,
+    pub recorded_at: u64,
     pub updated_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum DashboardAnalyticsContractDataKey {
-    IdList,
-    Item(Symbol),
-    Count,
+pub enum DataKey {
+    MetricList,
+    Metric(Symbol),
+    MetricCount,
+    CategoryTotal(Symbol),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum DashboardAnalyticsContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum AnalyticsError {
+    MetricNotFound = 1,
+    MetricAlreadyExists = 2,
+    NotReporter = 3,
+    InvalidMetricName = 4,
+    InvalidTimestamp = 5,
 }
 
 #[contract]
@@ -37,39 +43,15 @@ pub struct DashboardAnalyticsContract;
 
 #[contractimpl]
 impl DashboardAnalyticsContract {
-    fn count_key() -> DashboardAnalyticsContractDataKey {
-        DashboardAnalyticsContractDataKey::Count
-    }
-
-    fn ids_key() -> DashboardAnalyticsContractDataKey {
-        DashboardAnalyticsContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> DashboardAnalyticsContractDataKey {
-        DashboardAnalyticsContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, DashboardAnalyticsContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, DashboardAnalyticsContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage()
+            .instance()
+            .get(&DataKey::MetricList)
+            .unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&DataKey::MetricList, ids);
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +63,160 @@ impl DashboardAnalyticsContract {
         false
     }
 
-    pub fn log_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    fn increment_count(env: &Env) {
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MetricCount)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::MetricCount, &(count + 1));
+    }
 
-        let item = DashboardAnalyticsContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+    pub fn record_metric(
+        env: Env,
+        id: Symbol,
+        reporter: Address,
+        metric_name: String,
+        value: i128,
+        category: Symbol,
+        timestamp: u64,
+    ) {
+        reporter.require_auth();
+
+        if metric_name.len() == 0 {
+            panic_with_error!(env, AnalyticsError::InvalidMetricName);
+        }
+        if timestamp == 0 {
+            panic_with_error!(env, AnalyticsError::InvalidTimestamp);
+        }
+
+        let key = DataKey::Metric(id.clone());
+        if env.storage().instance().has(&key) {
+            panic_with_error!(env, AnalyticsError::MetricAlreadyExists);
+        }
+
+        let metric = Metric {
+            reporter,
+            metric_name,
+            value,
+            category: category.clone(),
+            event_type: Symbol::new(&env, "metric"),
+            description: String::from_str(&env, ""),
+            recorded_at: timestamp,
+            updated_at: timestamp,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
+        env.storage().instance().set(&key, &metric);
 
-        env.storage().instance().set(&key, &item);
+        let cat_key = DataKey::CategoryTotal(category);
+        let cat_total: i128 = env.storage().instance().get(&cat_key).unwrap_or(0);
+        env.storage().instance().set(&cat_key, &(cat_total + value));
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
-            }
+            Self::increment_count(&env);
         }
     }
 
-    pub fn analyze_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<DashboardAnalyticsContractItem> = env.storage().instance().get(&key);
+    pub fn update_metric(
+        env: Env,
+        id: Symbol,
+        reporter: Address,
+        new_value: i128,
+        timestamp: u64,
+    ) {
+        reporter.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        if timestamp == 0 {
+            panic_with_error!(env, AnalyticsError::InvalidTimestamp);
+        }
+
+        let key = DataKey::Metric(id.clone());
+        let mut metric: Metric = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(env, AnalyticsError::MetricNotFound));
+
+        if metric.reporter != reporter {
+            panic_with_error!(env, AnalyticsError::NotReporter);
+        }
+
+        let old_value = metric.value;
+        let cat_key = DataKey::CategoryTotal(metric.category.clone());
+        let cat_total: i128 = env.storage().instance().get(&cat_key).unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&cat_key, &(cat_total - old_value + new_value));
+
+        metric.value = new_value;
+        metric.updated_at = timestamp;
+        env.storage().instance().set(&key, &metric);
+    }
+
+    pub fn record_event(
+        env: Env,
+        id: Symbol,
+        reporter: Address,
+        event_type: Symbol,
+        description: String,
+        timestamp: u64,
+    ) {
+        reporter.require_auth();
+
+        if timestamp == 0 {
+            panic_with_error!(env, AnalyticsError::InvalidTimestamp);
+        }
+
+        let key = DataKey::Metric(id.clone());
+        if env.storage().instance().has(&key) {
+            panic_with_error!(env, AnalyticsError::MetricAlreadyExists);
+        }
+
+        let metric = Metric {
+            reporter,
+            metric_name: String::from_str(&env, "event"),
+            value: 0,
+            category: Symbol::new(&env, "events"),
+            event_type,
+            description,
+            recorded_at: timestamp,
+            updated_at: timestamp,
+        };
+
+        env.storage().instance().set(&key, &metric);
+
+        let mut ids = Self::load_ids(&env);
+        if !Self::has_id(&ids, &id) {
+            ids.push_back(id);
+            Self::save_ids(&env, &ids);
+            Self::increment_count(&env);
         }
     }
 
-    pub fn export_item(env: Env, id: Symbol) -> Option<DashboardAnalyticsContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn get_metric(env: Env, id: Symbol) -> Option<Metric> {
+        env.storage().instance().get(&DataKey::Metric(id))
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn list_metrics(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_category_total(env: Env, category: Symbol) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::CategoryTotal(category))
+            .unwrap_or(0)
+    }
+
+    pub fn get_metric_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MetricCount)
+            .unwrap_or(0)
     }
 }

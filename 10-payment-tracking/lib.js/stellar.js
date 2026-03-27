@@ -89,41 +89,62 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const recordEntry = async (payload) => {
+export const createInvoice = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.issuer) throw new Error("issuer address is required");
+    if (!payload?.recipient) throw new Error("recipient address is required");
 
-    return invokeWrite("record_item", [
+    return invokeWrite("create_invoice", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
+        new Address(payload.issuer).toScVal(),
+        new Address(payload.recipient).toScVal(),
+        nativeToScVal(payload.description || ""),
         toI128(payload.amount),
-        toU64(payload.updatedAt),
+        toU64(payload.dueDate),
     ]);
 };
 
-export const verifyEntry = async (payload) => {
+export const markPaid = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.payer) throw new Error("payer address is required");
 
-    return invokeWrite("verify_item", [
+    return invokeWrite("mark_paid", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.payer).toScVal(),
+        toI128(payload.paidAmount),
+        toU64(payload.paidAt),
     ]);
 };
 
-export const settleEntry = async (id) => {
+export const markOverdue = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.issuer) throw new Error("issuer address is required");
+
+    return invokeWrite("mark_overdue", [
+        toSymbol(payload.id),
+        new Address(payload.issuer).toScVal(),
+    ]);
+};
+
+export const cancelInvoice = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.issuer) throw new Error("issuer address is required");
+
+    return invokeWrite("cancel_invoice", [
+        toSymbol(payload.id),
+        new Address(payload.issuer).toScVal(),
+    ]);
+};
+
+export const getInvoice = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("settle_item", [toSymbol(id)]);
+    return invokeRead("get_invoice", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listInvoices = async () => {
+    return invokeRead("list_invoices", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getTotalOutstanding = async () => {
+    return invokeRead("get_total_outstanding", []);
 };

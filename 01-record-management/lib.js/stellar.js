@@ -9,7 +9,6 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
 
 const requireConfig = () => {
@@ -89,39 +88,56 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const createEntry = async (payload) => {
+export const createRecord = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
     if (!payload?.owner) throw new Error("owner address is required");
 
-    return invokeWrite("create_item", [
+    return invokeWrite("create_record", [
         toSymbol(payload.id),
         new Address(payload.owner).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        toSymbol(payload.category || "general"),
+        nativeToScVal(payload.description || ""),
+        toU64(payload.createdAt),
     ]);
 };
 
-export const updateEntry = async (payload) => {
+export const updateRecord = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
 
-    return invokeWrite("update_item", [
+    return invokeWrite("update_record", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
+        new Address(payload.owner).toScVal(),
+        nativeToScVal(payload.title || ""),
+        toSymbol(payload.category || "general"),
+        nativeToScVal(payload.description || ""),
         toU64(payload.updatedAt),
     ]);
 };
 
-export const retrieveEntry = async (id) => {
-    if (!id) throw new Error("id is required");
-    return invokeRead("retrieve_item", [toSymbol(id)]);
+export const archiveRecord = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
+
+    return invokeWrite("archive_record", [
+        toSymbol(payload.id),
+        new Address(payload.owner).toScVal(),
+    ]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const getRecord = async (id) => {
+    if (!id) throw new Error("id is required");
+    return invokeRead("get_record", [toSymbol(id)]);
+};
+
+export const listRecords = async () => {
+    return invokeRead("list_records", []);
+};
+
+export const getRecordsByCategory = async (category) => {
+    if (!category) throw new Error("category is required");
+    return invokeRead("get_records_by_category", [toSymbol(category)]);
 };
 
 export const getCount = async () => {

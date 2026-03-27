@@ -9,8 +9,6 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
-const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +87,70 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const publishEntry = async (payload) => {
+export const createArticle = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.author) throw new Error("author address is required");
 
-    return invokeWrite("publish_item", [
+    return invokeWrite("create_article", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
+        new Address(payload.author).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.content || ""),
+        toSymbol(payload.category || "general"),
+        nativeToScVal(payload.tags || ""),
     ]);
 };
 
-export const searchEntry = async (payload) => {
+export const editArticle = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.editor) throw new Error("editor address is required");
 
-    return invokeWrite("search_item", [
+    return invokeWrite("edit_article", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.editor).toScVal(),
+        nativeToScVal(payload.newContent || ""),
     ]);
 };
 
-export const rateEntry = async (id) => {
+export const upvoteArticle = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.voter) throw new Error("voter address is required");
+
+    return invokeWrite("upvote_article", [
+        toSymbol(payload.id),
+        new Address(payload.voter).toScVal(),
+    ]);
+};
+
+export const markAnswer = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.author) throw new Error("author address is required");
+
+    return invokeWrite("mark_answer", [
+        toSymbol(payload.id),
+        new Address(payload.author).toScVal(),
+    ]);
+};
+
+export const archiveArticle = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.author) throw new Error("author address is required");
+
+    return invokeWrite("archive_article", [
+        toSymbol(payload.id),
+        new Address(payload.author).toScVal(),
+    ]);
+};
+
+export const getArticle = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("rate_item", [toSymbol(id)]);
+    return invokeRead("get_article", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listArticles = async () => {
+    return invokeRead("list_articles", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getArticleCount = async () => {
+    return invokeRead("get_article_count", []);
 };

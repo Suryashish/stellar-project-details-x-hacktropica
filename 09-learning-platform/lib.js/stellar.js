@@ -11,6 +11,7 @@ const server = new rpc.Server(RPC_URL);
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +90,62 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const enrollEntry = async (payload) => {
+export const createCourse = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.instructor) throw new Error("instructor address is required");
 
-    return invokeWrite("enroll_item", [
+    return invokeWrite("create_course", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
+        new Address(payload.instructor).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.description || ""),
+        toSymbol(payload.category || "general"),
+        toU32(payload.maxStudents),
+        toI128(payload.price),
     ]);
 };
 
-export const progressEntry = async (payload) => {
-    if (!payload?.id) throw new Error("id is required");
+export const enrollStudent = async (payload) => {
+    if (!payload?.courseId) throw new Error("courseId is required");
+    if (!payload?.student) throw new Error("student address is required");
 
-    return invokeWrite("progress_item", [
-        toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+    return invokeWrite("enroll_student", [
+        toSymbol(payload.courseId),
+        new Address(payload.student).toScVal(),
     ]);
 };
 
-export const completeEntry = async (id) => {
+export const completeCourse = async (payload) => {
+    if (!payload?.courseId) throw new Error("courseId is required");
+    if (!payload?.student) throw new Error("student address is required");
+
+    return invokeWrite("complete_course", [
+        toSymbol(payload.courseId),
+        new Address(payload.student).toScVal(),
+    ]);
+};
+
+export const rateCourse = async (payload) => {
+    if (!payload?.courseId) throw new Error("courseId is required");
+    if (!payload?.student) throw new Error("student address is required");
+
+    return invokeWrite("rate_course", [
+        toSymbol(payload.courseId),
+        new Address(payload.student).toScVal(),
+        toU32(payload.rating),
+    ]);
+};
+
+export const getCourse = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("complete_item", [toSymbol(id)]);
+    return invokeRead("get_course", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listCourses = async () => {
+    return invokeRead("list_courses", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getEnrollmentCount = async (courseId) => {
+    if (!courseId) throw new Error("courseId is required");
+    return invokeRead("get_enrollment_count", [toSymbol(courseId)]);
 };

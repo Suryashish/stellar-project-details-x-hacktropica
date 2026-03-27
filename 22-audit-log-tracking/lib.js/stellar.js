@@ -9,7 +9,7 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
 
 const requireConfig = () => {
@@ -89,41 +89,58 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const recordEntry = async (payload) => {
+export const logAction = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.actor) throw new Error("actor address is required");
 
-    return invokeWrite("record_item", [
+    return invokeWrite("log_action", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        new Address(payload.actor).toScVal(),
+        toSymbol(payload.actionType || "update"),
+        nativeToScVal(payload.target || ""),
+        nativeToScVal(payload.description || ""),
+        toU32(payload.severity),
+        toU64(payload.timestamp),
     ]);
 };
 
-export const queryEntry = async (payload) => {
+export const logAccess = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.accessor) throw new Error("accessor address is required");
 
-    return invokeWrite("query_item", [
+    return invokeWrite("log_access", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.accessor).toScVal(),
+        nativeToScVal(payload.resource || ""),
+        toSymbol(payload.accessType || "read"),
+        toU64(payload.timestamp),
     ]);
 };
 
-export const verifyEntry = async (id) => {
+export const flagEntry = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.auditor) throw new Error("auditor address is required");
+
+    return invokeWrite("flag_entry", [
+        toSymbol(payload.id),
+        new Address(payload.auditor).toScVal(),
+        nativeToScVal(payload.reason || ""),
+    ]);
+};
+
+export const getEntry = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("verify_item", [toSymbol(id)]);
+    return invokeRead("get_entry", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listEntries = async () => {
+    return invokeRead("list_entries", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getEntryCount = async () => {
+    return invokeRead("get_entry_count", []);
+};
+
+export const getFlaggedCount = async () => {
+    return invokeRead("get_flagged_count", []);
 };

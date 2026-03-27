@@ -7,29 +7,47 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct TrackingContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct Shipment {
+    pub sender: Address,
+    pub receiver_name: String,
+    pub origin: String,
+    pub destination: String,
+    pub weight: u32,
+    pub status: Symbol,
+    pub current_location: String,
+    pub checkpoint_count: u32,
+    pub created_at: u64,
+    pub delivered_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum TrackingContractDataKey {
-    IdList,
-    Item(Symbol),
-    Count,
+pub struct Checkpoint {
+    pub location: String,
+    pub notes: String,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKey {
+    ShipmentList,
+    Shipment(Symbol),
+    ShipmentCount,
+    Checkpoint(Symbol, u32),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum TrackingContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum TrackingError {
+    ShipmentNotFound = 1,
+    ShipmentAlreadyExists = 2,
+    NotSender = 3,
+    AlreadyDelivered = 4,
+    InvalidOrigin = 5,
+    InvalidDestination = 6,
+    InvalidTimestamp = 7,
 }
 
 #[contract]
@@ -37,39 +55,15 @@ pub struct TrackingContract;
 
 #[contractimpl]
 impl TrackingContract {
-    fn count_key() -> TrackingContractDataKey {
-        TrackingContractDataKey::Count
-    }
-
-    fn ids_key() -> TrackingContractDataKey {
-        TrackingContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> TrackingContractDataKey {
-        TrackingContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, TrackingContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, TrackingContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage()
+            .instance()
+            .get(&DataKey::ShipmentList)
+            .unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&DataKey::ShipmentList, ids);
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +75,176 @@ impl TrackingContract {
         false
     }
 
-    pub fn update_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    fn increment_count(env: &Env) {
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ShipmentCount)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::ShipmentCount, &(count + 1));
+    }
 
-        let item = TrackingContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+    pub fn create_shipment(
+        env: Env,
+        id: Symbol,
+        sender: Address,
+        receiver_name: String,
+        origin: String,
+        destination: String,
+        weight: u32,
+    ) {
+        sender.require_auth();
+
+        if origin.len() == 0 {
+            panic_with_error!(env, TrackingError::InvalidOrigin);
+        }
+        if destination.len() == 0 {
+            panic_with_error!(env, TrackingError::InvalidDestination);
+        }
+
+        let key = DataKey::Shipment(id.clone());
+        if env.storage().instance().has(&key) {
+            panic_with_error!(env, TrackingError::ShipmentAlreadyExists);
+        }
+
+        let shipment = Shipment {
+            sender,
+            receiver_name,
+            origin: origin.clone(),
+            destination,
+            weight,
+            status: Symbol::new(&env, "created"),
+            current_location: origin,
+            checkpoint_count: 0,
+            created_at: env.ledger().timestamp(),
+            delivered_at: 0,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &shipment);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
-            }
+            Self::increment_count(&env);
         }
     }
 
-    pub fn monitor_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<TrackingContractItem> = env.storage().instance().get(&key);
+    pub fn update_status(
+        env: Env,
+        id: Symbol,
+        sender: Address,
+        new_status: Symbol,
+        location: String,
+        timestamp: u64,
+    ) {
+        sender.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        if timestamp == 0 {
+            panic_with_error!(env, TrackingError::InvalidTimestamp);
         }
+
+        let key = DataKey::Shipment(id.clone());
+        let mut shipment: Shipment = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(env, TrackingError::ShipmentNotFound));
+
+        if shipment.sender != sender {
+            panic_with_error!(env, TrackingError::NotSender);
+        }
+        if shipment.delivered_at > 0 {
+            panic_with_error!(env, TrackingError::AlreadyDelivered);
+        }
+
+        shipment.status = new_status;
+        shipment.current_location = location;
+        env.storage().instance().set(&key, &shipment);
     }
 
-    pub fn report_item(env: Env, id: Symbol) -> Option<TrackingContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn add_checkpoint(
+        env: Env,
+        id: Symbol,
+        sender: Address,
+        location: String,
+        notes: String,
+        timestamp: u64,
+    ) {
+        sender.require_auth();
+
+        if timestamp == 0 {
+            panic_with_error!(env, TrackingError::InvalidTimestamp);
+        }
+
+        let key = DataKey::Shipment(id.clone());
+        let mut shipment: Shipment = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(env, TrackingError::ShipmentNotFound));
+
+        if shipment.sender != sender {
+            panic_with_error!(env, TrackingError::NotSender);
+        }
+
+        let cp_index = shipment.checkpoint_count;
+        let checkpoint = Checkpoint {
+            location: location.clone(),
+            notes,
+            timestamp,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Checkpoint(id.clone(), cp_index), &checkpoint);
+
+        shipment.checkpoint_count += 1;
+        shipment.current_location = location;
+        env.storage().instance().set(&key, &shipment);
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn mark_delivered(env: Env, id: Symbol, sender: Address, timestamp: u64) {
+        sender.require_auth();
+
+        if timestamp == 0 {
+            panic_with_error!(env, TrackingError::InvalidTimestamp);
+        }
+
+        let key = DataKey::Shipment(id.clone());
+        let mut shipment: Shipment = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| panic_with_error!(env, TrackingError::ShipmentNotFound));
+
+        if shipment.sender != sender {
+            panic_with_error!(env, TrackingError::NotSender);
+        }
+        if shipment.delivered_at > 0 {
+            panic_with_error!(env, TrackingError::AlreadyDelivered);
+        }
+
+        shipment.status = Symbol::new(&env, "delivered");
+        shipment.current_location = shipment.destination.clone();
+        shipment.delivered_at = timestamp;
+        env.storage().instance().set(&key, &shipment);
+    }
+
+    pub fn get_shipment(env: Env, id: Symbol) -> Option<Shipment> {
+        env.storage().instance().get(&DataKey::Shipment(id))
+    }
+
+    pub fn list_shipments(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_shipment_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ShipmentCount)
+            .unwrap_or(0)
     }
 }

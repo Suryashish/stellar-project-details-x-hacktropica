@@ -89,41 +89,57 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const createEntry = async (payload) => {
+export const createCampaign = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.organizer) throw new Error("organizer address is required");
 
-    return invokeWrite("create_item", [
+    return invokeWrite("create_campaign", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
+        new Address(payload.organizer).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
+        nativeToScVal(payload.description || ""),
+        toI128(payload.goalAmount),
+        toU64(payload.deadline),
+    ]);
+};
+
+export const donate = async (payload) => {
+    if (!payload?.campaignId) throw new Error("campaignId is required");
+    if (!payload?.donor) throw new Error("donor address is required");
+
+    return invokeWrite("donate", [
+        toSymbol(payload.campaignId),
+        new Address(payload.donor).toScVal(),
         toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.message || ""),
     ]);
 };
 
-export const donateEntry = async (payload) => {
+export const closeCampaign = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.organizer) throw new Error("organizer address is required");
 
-    return invokeWrite("donate_item", [
+    return invokeWrite("close_campaign", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.organizer).toScVal(),
     ]);
 };
 
-export const withdrawEntry = async (id) => {
+export const getCampaign = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("withdraw_item", [toSymbol(id)]);
+    return invokeRead("get_campaign", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listCampaigns = async () => {
+    return invokeRead("list_campaigns", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getDonorCount = async (campaignId) => {
+    if (!campaignId) throw new Error("campaignId is required");
+    return invokeRead("get_donor_count", [toSymbol(campaignId)]);
+};
+
+export const getTotalRaised = async (campaignId) => {
+    if (!campaignId) throw new Error("campaignId is required");
+    return invokeRead("get_total_raised", [toSymbol(campaignId)]);
 };

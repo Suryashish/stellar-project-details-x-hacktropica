@@ -10,6 +10,7 @@ const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
 
 const requireConfig = () => {
@@ -89,41 +90,64 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const listEntry = async (payload) => {
+export const listResource = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
     if (!payload?.owner) throw new Error("owner address is required");
 
-    return invokeWrite("list_item", [
+    return invokeWrite("list_resource", [
         toSymbol(payload.id),
         new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.name || ""),
+        nativeToScVal(payload.description || ""),
+        toSymbol(payload.category || "other"),
+        toI128(payload.dailyRate),
+        toI128(payload.depositRequired),
     ]);
 };
 
-export const borrowEntry = async (payload) => {
+export const borrowResource = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.borrower) throw new Error("borrower address is required");
 
-    return invokeWrite("borrow_item", [
+    return invokeWrite("borrow_resource", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.borrower).toScVal(),
+        toU64(payload.startDate),
+        toU64(payload.endDate),
     ]);
 };
 
-export const returnEntry = async (id) => {
+export const returnResource = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.borrower) throw new Error("borrower address is required");
+
+    return invokeWrite("return_resource", [
+        toSymbol(payload.id),
+        new Address(payload.borrower).toScVal(),
+        nativeToScVal(payload.conditionNotes || ""),
+    ]);
+};
+
+export const rateTransaction = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.rater) throw new Error("rater address is required");
+
+    return invokeWrite("rate_transaction", [
+        toSymbol(payload.id),
+        new Address(payload.rater).toScVal(),
+        toU32(payload.rating),
+    ]);
+};
+
+export const getResource = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("return_item", [toSymbol(id)]);
+    return invokeRead("get_resource", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listResources = async () => {
+    return invokeRead("list_resources", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getAvailableCount = async () => {
+    return invokeRead("get_available_count", []);
 };

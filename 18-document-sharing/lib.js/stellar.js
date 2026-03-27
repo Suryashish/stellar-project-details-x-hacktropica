@@ -9,8 +9,9 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
-const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
+const toStr = (value) => nativeToScVal(String(value || ""));
+const toAddr = (value) => new Address(value).toScVal();
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +90,65 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const uploadEntry = async (payload) => {
+export const uploadDoc = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
     if (!payload?.owner) throw new Error("owner address is required");
 
-    return invokeWrite("upload_item", [
+    return invokeWrite("upload_doc", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        toAddr(payload.owner),
+        toStr(payload.title),
+        toStr(payload.docHash),
+        toSymbol(payload.docType || "pdf"),
+        toU32(payload.fileSize),
     ]);
 };
 
-export const shareEntry = async (payload) => {
+export const shareDoc = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.sharedWith) throw new Error("sharedWith address is required");
 
-    return invokeWrite("share_item", [
+    return invokeWrite("share_doc", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        toAddr(payload.owner),
+        toAddr(payload.sharedWith),
     ]);
 };
 
-export const downloadEntry = async (id) => {
+export const revokeAccess = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.revokedFrom) throw new Error("revokedFrom address is required");
+
+    return invokeWrite("revoke_access", [
+        toSymbol(payload.id),
+        toAddr(payload.owner),
+        toAddr(payload.revokedFrom),
+    ]);
+};
+
+export const updateDoc = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
+
+    return invokeWrite("update_doc", [
+        toSymbol(payload.id),
+        toAddr(payload.owner),
+        toStr(payload.newHash),
+        toU32(payload.newSize),
+    ]);
+};
+
+export const getDoc = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("download_item", [toSymbol(id)]);
+    return invokeRead("get_doc", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listDocs = async () => {
+    return invokeRead("list_docs", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getDocCount = async () => {
+    return invokeRead("get_doc_count", []);
 };

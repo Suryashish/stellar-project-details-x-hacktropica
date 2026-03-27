@@ -89,41 +89,60 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const bookEntry = async (payload) => {
+export const createSlot = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.provider) throw new Error("provider address is required");
 
-    return invokeWrite("book_item", [
+    return invokeWrite("create_slot", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        new Address(payload.provider).toScVal(),
+        nativeToScVal(payload.serviceName || ""),
+        toU64(payload.date),
+        toU64(payload.startTime),
+        toU64(payload.endTime),
+        toI128(payload.price),
     ]);
 };
 
-export const confirmEntry = async (payload) => {
+export const bookSlot = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.customer) throw new Error("customer address is required");
 
-    return invokeWrite("confirm_item", [
+    return invokeWrite("book_slot", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.customer).toScVal(),
     ]);
 };
 
-export const cancelEntry = async (id) => {
+export const cancelBooking = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.caller) throw new Error("caller address is required");
+
+    return invokeWrite("cancel_booking", [
+        toSymbol(payload.id),
+        new Address(payload.caller).toScVal(),
+    ]);
+};
+
+export const completeBooking = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.provider) throw new Error("provider address is required");
+
+    return invokeWrite("complete_booking", [
+        toSymbol(payload.id),
+        new Address(payload.provider).toScVal(),
+    ]);
+};
+
+export const getSlot = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("cancel_item", [toSymbol(id)]);
+    return invokeRead("get_slot", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listSlots = async () => {
+    return invokeRead("list_slots", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getSlotCount = async () => {
+    return invokeRead("get_slot_count", []);
 };

@@ -89,41 +89,54 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const donateEntry = async (payload) => {
+export const createCause = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.organizer) throw new Error("organizer address is required");
 
-    return invokeWrite("donate_item", [
+    return invokeWrite("create_cause", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
+        new Address(payload.organizer).toScVal(),
+        nativeToScVal(payload.name || ""),
+        nativeToScVal(payload.description || ""),
+        toI128(payload.goalAmount),
+    ]);
+};
+
+export const donateToCause = async (payload) => {
+    if (!payload?.causeId) throw new Error("causeId is required");
+    if (!payload?.donor) throw new Error("donor address is required");
+
+    return invokeWrite("donate_to_cause", [
+        toSymbol(payload.causeId),
+        new Address(payload.donor).toScVal(),
         toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.message || ""),
     ]);
 };
 
-export const trackEntry = async (payload) => {
-    if (!payload?.id) throw new Error("id is required");
-
-    return invokeWrite("track_item", [
-        toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
-    ]);
-};
-
-export const verifyEntry = async (id) => {
+export const getCause = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("verify_item", [toSymbol(id)]);
+    return invokeRead("get_cause", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listCauses = async () => {
+    return invokeRead("list_causes", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getDonorTotal = async (causeId, donor) => {
+    if (!causeId) throw new Error("causeId is required");
+    if (!donor) throw new Error("donor address is required");
+    return invokeRead("get_donor_total", [
+        toSymbol(causeId),
+        new Address(donor).toScVal(),
+    ]);
+};
+
+export const getTopDonation = async (causeId) => {
+    if (!causeId) throw new Error("causeId is required");
+    return invokeRead("get_top_donation", [toSymbol(causeId)]);
+};
+
+export const getCauseCount = async () => {
+    return invokeRead("get_cause_count", []);
 };

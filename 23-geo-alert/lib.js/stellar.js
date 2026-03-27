@@ -10,6 +10,7 @@ const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
 
 const requireConfig = () => {
@@ -89,41 +90,63 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const createEntry = async (payload) => {
+export const createAlert = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.creator) throw new Error("creator address is required");
 
-    return invokeWrite("create_item", [
+    return invokeWrite("create_alert", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
+        new Address(payload.creator).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.description || ""),
+        toSymbol(payload.alertType || "info"),
+        toI128(payload.latitude),
+        toI128(payload.longitude),
+        toU32(payload.radius),
+        toU32(payload.severity),
+        toU64(payload.expiresAt),
     ]);
 };
 
-export const triggerEntry = async (payload) => {
+export const acknowledgeAlert = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.responder) throw new Error("responder address is required");
 
-    return invokeWrite("trigger_item", [
+    return invokeWrite("acknowledge_alert", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.responder).toScVal(),
     ]);
 };
 
-export const subscribeEntry = async (id) => {
+export const resolveAlert = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.creator) throw new Error("creator address is required");
+
+    return invokeWrite("resolve_alert", [
+        toSymbol(payload.id),
+        new Address(payload.creator).toScVal(),
+    ]);
+};
+
+export const escalateAlert = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.creator) throw new Error("creator address is required");
+
+    return invokeWrite("escalate_alert", [
+        toSymbol(payload.id),
+        new Address(payload.creator).toScVal(),
+    ]);
+};
+
+export const getAlert = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("subscribe_item", [toSymbol(id)]);
+    return invokeRead("get_alert", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listAlerts = async () => {
+    return invokeRead("list_alerts", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getActiveCount = async () => {
+    return invokeRead("get_active_count", []);
 };

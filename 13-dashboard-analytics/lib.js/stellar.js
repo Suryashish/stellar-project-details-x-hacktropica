@@ -89,41 +89,59 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const logEntry = async (payload) => {
+export const recordMetric = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.reporter) throw new Error("reporter address is required");
 
-    return invokeWrite("log_item", [
+    return invokeWrite("record_metric", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        new Address(payload.reporter).toScVal(),
+        nativeToScVal(payload.metricName || ""),
+        toI128(payload.value),
+        toSymbol(payload.category || "general"),
+        toU64(payload.timestamp),
     ]);
 };
 
-export const analyzeEntry = async (payload) => {
+export const updateMetric = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.reporter) throw new Error("reporter address is required");
 
-    return invokeWrite("analyze_item", [
+    return invokeWrite("update_metric", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.reporter).toScVal(),
+        toI128(payload.newValue),
+        toU64(payload.timestamp),
     ]);
 };
 
-export const exportEntry = async (id) => {
+export const recordEvent = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.reporter) throw new Error("reporter address is required");
+
+    return invokeWrite("record_event", [
+        toSymbol(payload.id),
+        new Address(payload.reporter).toScVal(),
+        toSymbol(payload.eventType || "info"),
+        nativeToScVal(payload.description || ""),
+        toU64(payload.timestamp),
+    ]);
+};
+
+export const getMetric = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("export_item", [toSymbol(id)]);
+    return invokeRead("get_metric", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listMetrics = async () => {
+    return invokeRead("list_metrics", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getCategoryTotal = async (category) => {
+    if (!category) throw new Error("category is required");
+    return invokeRead("get_category_total", [toSymbol(category)]);
+};
+
+export const getMetricCount = async () => {
+    return invokeRead("get_metric_count", []);
 };

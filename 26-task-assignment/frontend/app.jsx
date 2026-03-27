@@ -1,56 +1,36 @@
 import React, { useState } from "react";
-import { checkConnection, assignEntry, completeEntry, reviewEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 26,
-    title: "Task / Assignment System",
-    style: "productivity-kanban",
-    label: "task",
-    writeAction: "assign",
-    updateAction: "complete",
-    readAction: "review",
-};
+import { checkConnection, createTask, assignTask, startTask, completeTask, reviewTask, getTask, listTasks, getTaskCount } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
-
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "task1",
+        creator: "",
+        assignee: "",
+        reviewer: "",
+        title: "Implement login page",
+        description: "Build the login UI with form validation",
+        priority: "3",
+        dueDate: String(nowTs() + 86400 * 7),
+        estimatedHours: "8",
+        actualHours: "6",
+        approved: true,
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
+    const [taskCount, setTaskCount] = useState("-");
 
     const setField = (event) => {
-        const { name, value } = event.target;
-        setForm((prev) => ({ ...prev, [name]: value }));
+        const { name, value, type, checked } = event.target;
+        setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +46,122 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => assignEntry(payload()));
+    const onCreateTask = () => runAction(async () =>
+        createTask({
+            id: form.id.trim(),
+            creator: form.creator.trim(),
+            title: form.title.trim(),
+            description: form.description.trim(),
+            priority: form.priority.trim(),
+            dueDate: form.dueDate.trim(),
+            estimatedHours: form.estimatedHours.trim(),
+        })
+    );
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return completeEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onAssignTask = () => runAction(async () =>
+        assignTask({
+            id: form.id.trim(),
+            creator: form.creator.trim(),
+            assignee: form.assignee.trim(),
+        })
+    );
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return reviewEntry(next.id);
-    });
+    const onStartTask = () => runAction(async () =>
+        startTask({
+            id: form.id.trim(),
+            assignee: form.assignee.trim(),
+        })
+    );
 
-    const onList = () => runAction(async () => listIds());
+    const onCompleteTask = () => runAction(async () =>
+        completeTask({
+            id: form.id.trim(),
+            assignee: form.assignee.trim(),
+            actualHours: form.actualHours.trim(),
+        })
+    );
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
-        return { count: value };
+    const onReviewTask = () => runAction(async () =>
+        reviewTask({
+            id: form.id.trim(),
+            reviewer: form.reviewer.trim(),
+            approved: form.approved,
+        })
+    );
+
+    const onGetTask = () => runAction(async () => getTask(form.id.trim()));
+
+    const onListTasks = () => runAction(async () => listTasks());
+
+    const onGetCount = () => runAction(async () => {
+        const value = await getTaskCount();
+        setTaskCount(String(value));
+        return { taskCount: value };
     });
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 26</p>
+                <h1>Task / Project Assignment System</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Create tasks, assign to team members, track progress through review and approval.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total tasks: {taskCount}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="id">Task ID (Symbol)</label>
+                <input id="id" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="creator">Creator Address</label>
+                <input id="creator" name="creator" value={form.creator} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="assignee">Assignee Address</label>
+                <input id="assignee" name="assignee" value={form.assignee} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="reviewer">Reviewer Address</label>
+                <input id="reviewer" name="reviewer" value={form.reviewer} onChange={setField} placeholder="G..." />
 
                 <label htmlFor="title">Title</label>
                 <input id="title" name="title" value={form.title} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="description">Description</label>
+                <input id="description" name="description" value={form.description} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="priority">Priority (0-5)</label>
+                <input id="priority" name="priority" value={form.priority} onChange={setField} type="number" />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="dueDate">Due Date (u64 timestamp)</label>
+                <input id="dueDate" name="dueDate" value={form.dueDate} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="estimatedHours">Estimated Hours</label>
+                <input id="estimatedHours" name="estimatedHours" value={form.estimatedHours} onChange={setField} type="number" />
+
+                <label htmlFor="actualHours">Actual Hours (for complete)</label>
+                <input id="actualHours" name="actualHours" value={form.actualHours} onChange={setField} type="number" />
+
+                <label htmlFor="approved">
+                    <input id="approved" name="approved" type="checkbox" checked={form.approved} onChange={setField} />
+                    Approved (for review)
+                </label>
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateTask} disabled={isBusy}>Create Task</button>
+                    <button type="button" onClick={onAssignTask} disabled={isBusy}>Assign Task</button>
+                    <button type="button" onClick={onStartTask} disabled={isBusy}>Start Task</button>
+                    <button type="button" onClick={onCompleteTask} disabled={isBusy}>Complete Task</button>
+                    <button type="button" onClick={onReviewTask} disabled={isBusy}>Review Task</button>
+                    <button type="button" onClick={onGetTask} disabled={isBusy}>Get Task</button>
+                    <button type="button" onClick={onListTasks} disabled={isBusy}>List Tasks</button>
+                    <button type="button" onClick={onGetCount} disabled={isBusy}>Get Count</button>
                 </div>
             </section>
 

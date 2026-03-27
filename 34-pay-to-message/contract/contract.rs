@@ -7,29 +7,34 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct PayToMessageContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct Message {
+    pub sender: Address,
+    pub recipient: Address,
+    pub content: String,
+    pub payment: i128,
+    pub is_read: bool,
+    pub sent_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum PayToMessageContractDataKey {
-    IdList,
-    Item(Symbol),
-    Count,
+pub enum PayToMessageDataKey {
+    MessageList,
+    Message(Symbol),
+    Inbox(Address),
+    MessageRate(Address),
+    Earnings(Address),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum PayToMessageContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum PayToMessageError {
+    ContentEmpty = 1,
+    InsufficientPayment = 2,
+    MessageNotFound = 3,
+    InvalidRate = 4,
+    InvalidTimestamp = 5,
 }
 
 #[contract]
@@ -37,39 +42,28 @@ pub struct PayToMessageContract;
 
 #[contractimpl]
 impl PayToMessageContract {
-    fn count_key() -> PayToMessageContractDataKey {
-        PayToMessageContractDataKey::Count
+    fn msg_key(id: &Symbol) -> PayToMessageDataKey {
+        PayToMessageDataKey::Message(id.clone())
     }
 
-    fn ids_key() -> PayToMessageContractDataKey {
-        PayToMessageContractDataKey::IdList
+    fn list_key() -> PayToMessageDataKey {
+        PayToMessageDataKey::MessageList
     }
 
-    fn item_key(id: &Symbol) -> PayToMessageContractDataKey {
-        PayToMessageContractDataKey::Item(id.clone())
+    fn inbox_key(recipient: &Address) -> PayToMessageDataKey {
+        PayToMessageDataKey::Inbox(recipient.clone())
     }
 
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, PayToMessageContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, PayToMessageContractError::InvalidTimestamp);
-        }
+    fn rate_key(recipient: &Address) -> PayToMessageDataKey {
+        PayToMessageDataKey::MessageRate(recipient.clone())
     }
 
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn earnings_key(recipient: &Address) -> PayToMessageDataKey {
+        PayToMessageDataKey::Earnings(recipient.clone())
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
-    }
-
-    fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().get(&Self::list_key()).unwrap_or(Vec::new(env))
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +75,88 @@ impl PayToMessageContract {
         false
     }
 
-    pub fn send_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    pub fn set_rate(env: Env, recipient: Address, rate_per_message: i128) {
+        recipient.require_auth();
+        if rate_per_message < 0 {
+            panic_with_error!(&env, PayToMessageError::InvalidRate);
+        }
+        env.storage().instance().set(&Self::rate_key(&recipient), &rate_per_message);
+    }
 
-        let item = PayToMessageContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+    pub fn send_message(
+        env: Env,
+        id: Symbol,
+        sender: Address,
+        recipient: Address,
+        content: String,
+        payment_amount: i128,
+    ) {
+        sender.require_auth();
+
+        if content.len() == 0 {
+            panic_with_error!(&env, PayToMessageError::ContentEmpty);
+        }
+
+        let rate: i128 = env.storage().instance().get(&Self::rate_key(&recipient)).unwrap_or(0);
+        if payment_amount < rate {
+            panic_with_error!(&env, PayToMessageError::InsufficientPayment);
+        }
+
+        let sent_at = env.ledger().timestamp();
+
+        let message = Message {
+            sender,
+            recipient: recipient.clone(),
+            content,
+            payment: payment_amount,
+            is_read: false,
+            sent_at,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&Self::msg_key(&id), &message);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
-            ids.push_back(id);
-            Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
-            }
+            ids.push_back(id.clone());
+            env.storage().instance().set(&Self::list_key(), &ids);
         }
+
+        let mut inbox: Vec<Symbol> = env.storage().instance().get(&Self::inbox_key(&recipient)).unwrap_or(Vec::new(&env));
+        if !Self::has_id(&inbox, &id) {
+            inbox.push_back(id);
+            env.storage().instance().set(&Self::inbox_key(&recipient), &inbox);
+        }
+
+        let earnings: i128 = env.storage().instance().get(&Self::earnings_key(&recipient)).unwrap_or(0);
+        env.storage().instance().set(&Self::earnings_key(&recipient), &(earnings + payment_amount));
     }
 
-    pub fn receive_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<PayToMessageContractItem> = env.storage().instance().get(&key);
-
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
+    pub fn read_message(env: Env, id: Symbol, recipient: Address) -> bool {
+        recipient.require_auth();
+        let key = Self::msg_key(&id);
+        let maybe_msg: Option<Message> = env.storage().instance().get(&key);
+        if let Some(mut msg) = maybe_msg {
+            msg.is_read = true;
+            env.storage().instance().set(&key, &msg);
             true
         } else {
             false
         }
     }
 
-    pub fn tip_item(env: Env, id: Symbol) -> Option<PayToMessageContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn get_message(env: Env, id: Symbol) -> Option<Message> {
+        env.storage().instance().get(&Self::msg_key(&id))
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
-        Self::load_ids(&env)
+    pub fn list_inbox(env: Env, recipient: Address) -> Vec<Symbol> {
+        env.storage().instance().get(&Self::inbox_key(&recipient)).unwrap_or(Vec::new(&env))
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_rate(env: Env, recipient: Address) -> i128 {
+        env.storage().instance().get(&Self::rate_key(&recipient)).unwrap_or(0)
+    }
+
+    pub fn get_earnings(env: Env, recipient: Address) -> i128 {
+        env.storage().instance().get(&Self::earnings_key(&recipient)).unwrap_or(0)
     }
 }

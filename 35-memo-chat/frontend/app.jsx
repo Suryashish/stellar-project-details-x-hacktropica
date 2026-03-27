@@ -1,56 +1,34 @@
 import React, { useState } from "react";
-import { checkConnection, composeEntry, broadcastEntry, trackEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 35,
-    title: "Transaction Memo Chat",
-    style: "ledger-feed",
-    label: "broadcast",
-    writeAction: "compose",
-    updateAction: "broadcast",
-    readAction: "track",
-};
+import { checkConnection, createChannel, joinChannel, sendMemo, getMemo, getChannel, listChannels, getChannelMessageCount } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
-
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "memo1",
+        channelId: "general",
+        creator: "",
+        sender: "",
+        member: "",
+        channelName: "General Chat",
+        description: "Public discussion channel",
+        content: "Hello channel!",
+        isPublic: true,
+        timestamp: String(nowTs()),
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
 
     const setField = (event) => {
-        const { name, value } = event.target;
-        setForm((prev) => ({ ...prev, [name]: value }));
+        const { name, value, type, checked } = event.target;
+        setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +44,88 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => composeEntry(payload()));
+    const onCreateChannel = () => runAction(() => createChannel({
+        id: form.channelId.trim(),
+        creator: form.creator.trim(),
+        channelName: form.channelName.trim(),
+        description: form.description.trim(),
+        isPublic: form.isPublic,
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return broadcastEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onJoinChannel = () => runAction(() => joinChannel(form.channelId.trim(), form.member.trim()));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return trackEntry(next.id);
-    });
+    const onSendMemo = () => runAction(() => sendMemo({
+        id: form.id.trim(),
+        sender: form.sender.trim(),
+        channel: form.channelId.trim(),
+        content: form.content.trim(),
+        timestamp: form.timestamp.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onGetMemo = () => runAction(() => getMemo(form.id.trim()));
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
-        return { count: value };
-    });
+    const onGetChannel = () => runAction(() => getChannel(form.channelId.trim()));
+
+    const onListChannels = () => runAction(() => listChannels());
+
+    const onGetMsgCount = () => runAction(() => getChannelMessageCount(form.channelId.trim()));
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
-                <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
-                </p>
-                <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
+                <p className="kicker">Stellar Soroban Project 35</p>
+                <h1>Transaction Memo Chat</h1>
+                <p className="subtitle">Create channels, join conversations, and send memos on-chain.</p>
+                <button type="button" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="channelId">Channel ID</label>
+                <input id="channelId" name="channelId" value={form.channelId} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="creator">Creator / Sender Address</label>
+                <input id="creator" name="creator" value={form.creator} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="sender">Memo Sender Address</label>
+                <input id="sender" name="sender" value={form.sender} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="member">Member Address (for join)</label>
+                <input id="member" name="member" value={form.member} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="channelName">Channel Name</label>
+                <input id="channelName" name="channelName" value={form.channelName} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="description">Description</label>
+                <input id="description" name="description" value={form.description} onChange={setField} />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="memoId">Memo ID</label>
+                <input id="memoId" name="id" value={form.id} onChange={setField} />
+
+                <label htmlFor="content">Memo Content</label>
+                <textarea id="content" name="content" rows="3" value={form.content} onChange={setField} />
+
+                <label htmlFor="timestamp">Timestamp (u64)</label>
+                <input id="timestamp" name="timestamp" value={form.timestamp} onChange={setField} type="number" />
+
+                <label>
+                    <input type="checkbox" name="isPublic" checked={form.isPublic} onChange={setField} />
+                    Public Channel
+                </label>
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateChannel} disabled={isBusy}>Create Channel</button>
+                    <button type="button" onClick={onJoinChannel} disabled={isBusy}>Join Channel</button>
+                    <button type="button" onClick={onSendMemo} disabled={isBusy}>Send Memo</button>
+                    <button type="button" onClick={onGetMemo} disabled={isBusy}>Get Memo</button>
+                    <button type="button" onClick={onGetChannel} disabled={isBusy}>Get Channel</button>
+                    <button type="button" onClick={onListChannels} disabled={isBusy}>List Channels</button>
+                    <button type="button" onClick={onGetMsgCount} disabled={isBusy}>Message Count</button>
                 </div>
             </section>
 

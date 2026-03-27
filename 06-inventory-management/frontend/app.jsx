@@ -1,32 +1,24 @@
 import React, { useState } from "react";
-import { checkConnection, stockEntry, sellEntry, auditEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 6,
-    title: "Inventory Management System",
-    style: "tabular",
-    label: "item",
-    writeAction: "stock",
-    updateAction: "sell",
-    readAction: "audit",
-};
+import { checkConnection, addProduct, updateStock, updatePrice, discontinueProduct, getProduct, listProducts, getLowStock, getTotalValue } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
 const initialForm = () => ({
-    id: `${meta.label}1`,
+    id: "prod1",
     owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
+    name: "Sample Product",
+    sku: "SKU-001",
+    quantity: "10",
+    unitPrice: "1000",
+    category: "general",
+    quantityChange: "5",
+    isAddition: true,
+    newPrice: "1500",
+    lowStockThreshold: "5",
 });
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
@@ -35,22 +27,11 @@ export default function App() {
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
 
     const setField = (event) => {
-        const { name, value } = event.target;
-        setForm((prev) => ({ ...prev, [name]: value }));
+        const { name, value, type, checked } = event.target;
+        setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +47,117 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => stockEntry(payload()));
+    const onAddProduct = () => runAction(async () => addProduct({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        name: form.name.trim(),
+        sku: form.sku.trim(),
+        quantity: form.quantity.trim(),
+        unitPrice: form.unitPrice.trim(),
+        category: form.category.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return sellEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onUpdateStock = () => runAction(async () => updateStock({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        quantityChange: form.quantityChange.trim(),
+        isAddition: form.isAddition,
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return auditEntry(next.id);
-    });
+    const onUpdatePrice = () => runAction(async () => updatePrice({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        newPrice: form.newPrice.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onDiscontinue = () => runAction(async () => discontinueProduct({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+    }));
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
-        return { count: value };
-    });
+    const onGetProduct = () => runAction(async () => getProduct(form.id.trim()));
+    const onListProducts = () => runAction(async () => listProducts());
+    const onGetLowStock = () => runAction(async () => getLowStock(form.lowStockThreshold.trim()));
+    const onGetTotalValue = () => runAction(async () => getTotalValue());
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 6</p>
+                <h1>Inventory Management System</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Manage products, track stock levels, update prices, and monitor inventory value.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
+                <h2>Product Details</h2>
+
+                <label htmlFor="entryId">Product ID (Symbol)</label>
                 <input id="entryId" name="id" value={form.id} onChange={setField} />
 
                 <label htmlFor="owner">Owner Address</label>
                 <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="name">Product Name</label>
+                <input id="name" name="name" value={form.name} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="sku">SKU</label>
+                <input id="sku" name="sku" value={form.sku} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="quantity">Quantity (u32)</label>
+                <input id="quantity" name="quantity" value={form.quantity} onChange={setField} type="number" />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="unitPrice">Unit Price (i128)</label>
+                <input id="unitPrice" name="unitPrice" value={form.unitPrice} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onAddProduct} disabled={isBusy}>Add Product</button>
+                    <button type="button" onClick={onGetProduct} disabled={isBusy}>Get Product</button>
+                    <button type="button" onClick={onListProducts} disabled={isBusy}>List Products</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Stock Management</h2>
+
+                <label htmlFor="quantityChange">Quantity Change (u32)</label>
+                <input id="quantityChange" name="quantityChange" value={form.quantityChange} onChange={setField} type="number" />
+
+                <label>
+                    <input type="checkbox" name="isAddition" checked={form.isAddition} onChange={setField} />
+                    {" "}Add stock (uncheck to remove)
+                </label>
+
+                <div className="actions">
+                    <button type="button" onClick={onUpdateStock} disabled={isBusy}>Update Stock</button>
+                    <button type="button" onClick={onDiscontinue} disabled={isBusy}>Discontinue Product</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Pricing and Reports</h2>
+
+                <label htmlFor="newPrice">New Price (i128)</label>
+                <input id="newPrice" name="newPrice" value={form.newPrice} onChange={setField} type="number" />
+
+                <label htmlFor="lowStockThreshold">Low Stock Threshold (u32)</label>
+                <input id="lowStockThreshold" name="lowStockThreshold" value={form.lowStockThreshold} onChange={setField} type="number" />
+
+                <div className="actions">
+                    <button type="button" onClick={onUpdatePrice} disabled={isBusy}>Update Price</button>
+                    <button type="button" onClick={onGetLowStock} disabled={isBusy}>Get Low Stock</button>
+                    <button type="button" onClick={onGetTotalValue} disabled={isBusy}>Get Total Value</button>
                 </div>
             </section>
 

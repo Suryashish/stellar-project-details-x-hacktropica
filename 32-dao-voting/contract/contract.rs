@@ -7,29 +7,40 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct DaoVotingContractItem {
-    pub owner: Address,
+pub struct Proposal {
+    pub proposer: Address,
     pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+    pub description: String,
+    pub category: Symbol,
+    pub votes_for: i128,
+    pub votes_against: i128,
+    pub voter_count: u32,
+    pub status: Symbol,
+    pub created_at: u64,
+    pub ends_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum DaoVotingContractDataKey {
+pub enum DataKey {
     IdList,
-    Item(Symbol),
+    Proposal(Symbol),
     Count,
+    Voted(Symbol, Address),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum DaoVotingContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum ContractError {
+    NotFound = 1,
+    NotAuthorized = 2,
+    InvalidTitle = 3,
+    AlreadyVoted = 4,
+    VotingEnded = 5,
+    NotActive = 6,
+    InvalidPower = 7,
+    CannotExecute = 8,
 }
 
 #[contract]
@@ -37,39 +48,12 @@ pub struct DaoVotingContract;
 
 #[contractimpl]
 impl DaoVotingContract {
-    fn count_key() -> DaoVotingContractDataKey {
-        DaoVotingContractDataKey::Count
-    }
-
-    fn ids_key() -> DaoVotingContractDataKey {
-        DaoVotingContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> DaoVotingContractDataKey {
-        DaoVotingContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, DaoVotingContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, DaoVotingContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage().instance().get(&DataKey::IdList).unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&DataKey::IdList, ids);
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +65,146 @@ impl DaoVotingContract {
         false
     }
 
-    pub fn submit_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    pub fn create_proposal(
+        env: Env,
+        id: Symbol,
+        proposer: Address,
+        title: String,
+        description: String,
+        category: Symbol,
+        voting_period: u64,
+    ) {
+        proposer.require_auth();
 
-        let item = DaoVotingContractItem {
-            owner,
+        if title.len() == 0 {
+            panic_with_error!(&env, ContractError::InvalidTitle);
+        }
+
+        let now = env.ledger().timestamp();
+        let active = Symbol::new(&env, "active");
+
+        let proposal = Proposal {
+            proposer,
             title,
-            notes,
-            state,
-            amount,
-            updated_at,
+            description,
+            category,
+            votes_for: 0,
+            votes_against: 0,
+            voter_count: 0,
+            status: active,
+            created_at: now,
+            ends_at: now + voting_period,
         };
 
-        let key = Self::item_key(&id);
+        let key = DataKey::Proposal(id.clone());
         let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &proposal);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
             if !exists {
-                Self::increment_count(&env);
+                let count: u32 = env.storage().instance().get(&DataKey::Count).unwrap_or(0);
+                env.storage().instance().set(&DataKey::Count, &(count + 1));
             }
         }
     }
 
-    pub fn vote_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<DaoVotingContractItem> = env.storage().instance().get(&key);
+    pub fn cast_vote(
+        env: Env,
+        proposal_id: Symbol,
+        voter: Address,
+        vote_power: i128,
+        in_favor: bool,
+    ) {
+        voter.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        if vote_power <= 0 {
+            panic_with_error!(&env, ContractError::InvalidPower);
         }
+
+        let key = DataKey::Proposal(proposal_id.clone());
+        let mut proposal: Proposal = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotFound));
+
+        let active = Symbol::new(&env, "active");
+        if proposal.status != active {
+            panic_with_error!(&env, ContractError::NotActive);
+        }
+
+        let now = env.ledger().timestamp();
+        if now > proposal.ends_at {
+            panic_with_error!(&env, ContractError::VotingEnded);
+        }
+
+        let vote_key = DataKey::Voted(proposal_id.clone(), voter.clone());
+        if env.storage().instance().has(&vote_key) {
+            panic_with_error!(&env, ContractError::AlreadyVoted);
+        }
+
+        if in_favor {
+            proposal.votes_for += vote_power;
+        } else {
+            proposal.votes_against += vote_power;
+        }
+        proposal.voter_count += 1;
+
+        env.storage().instance().set(&vote_key, &true);
+        env.storage().instance().set(&key, &proposal);
     }
 
-    pub fn execute_item(env: Env, id: Symbol) -> Option<DaoVotingContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn execute_proposal(env: Env, id: Symbol, executor: Address) {
+        executor.require_auth();
+
+        let key = DataKey::Proposal(id.clone());
+        let mut proposal: Proposal = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotFound));
+
+        let active = Symbol::new(&env, "active");
+        if proposal.status != active {
+            panic_with_error!(&env, ContractError::NotActive);
+        }
+
+        let now = env.ledger().timestamp();
+        if now <= proposal.ends_at {
+            panic_with_error!(&env, ContractError::CannotExecute);
+        }
+
+        if proposal.votes_for > proposal.votes_against {
+            proposal.status = Symbol::new(&env, "executed");
+        } else {
+            proposal.status = Symbol::new(&env, "rejected");
+        }
+
+        env.storage().instance().set(&key, &proposal);
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn veto_proposal(env: Env, id: Symbol, vetoer: Address) {
+        vetoer.require_auth();
+
+        let key = DataKey::Proposal(id.clone());
+        let mut proposal: Proposal = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotFound));
+
+        proposal.status = Symbol::new(&env, "vetoed");
+        env.storage().instance().set(&key, &proposal);
+    }
+
+    pub fn get_proposal(env: Env, id: Symbol) -> Option<Proposal> {
+        env.storage().instance().get(&DataKey::Proposal(id))
+    }
+
+    pub fn list_proposals(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn has_voted(env: Env, proposal_id: Symbol, voter: Address) -> bool {
+        let vote_key = DataKey::Voted(proposal_id, voter);
+        env.storage().instance().has(&vote_key)
+    }
+
+    pub fn get_proposal_count(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::Count).unwrap_or(0)
     }
 }

@@ -1,34 +1,22 @@
 import React, { useState } from "react";
-import { checkConnection, postEntry, replyEntry, moderateEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 20,
-    title: "Community Platform",
-    style: "social-feed",
-    label: "post",
-    writeAction: "post",
-    updateAction: "reply",
-    readAction: "moderate",
-};
-
-const nowTs = () => Math.floor(Date.now() / 1000);
-
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
+import { checkConnection, createPost, likePost, commentPost, flagPost, removePost, getPost, listPosts, getPostCount } from "../lib.js/stellar.js";
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
+
+const initialForm = () => ({
+    id: "post1",
+    author: "",
+    content: "Just deployed my first Soroban smart contract!",
+    category: "general",
+    tags: "stellar, soroban, web3",
+    liker: "",
+    commenter: "",
+    commentText: "",
+    flagger: "",
+});
 
 export default function App() {
     const [form, setForm] = useState(initialForm);
@@ -41,16 +29,6 @@ export default function App() {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,32 +44,46 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => postEntry(payload()));
+    const onCreate = () => runAction(async () => createPost({
+        id: form.id.trim(),
+        author: form.author.trim(),
+        content: form.content.trim(),
+        category: form.category.trim(),
+        tags: form.tags.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return replyEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onLike = () => runAction(async () => likePost({
+        id: form.id.trim(),
+        liker: form.liker.trim() || form.author.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return moderateEntry(next.id);
-    });
+    const onComment = () => runAction(async () => commentPost({
+        id: form.id.trim(),
+        commenter: form.commenter.trim() || form.author.trim(),
+        commentText: form.commentText.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onFlag = () => runAction(async () => flagPost({
+        id: form.id.trim(),
+        flagger: form.flagger.trim() || form.author.trim(),
+    }));
+
+    const onRemove = () => runAction(async () => removePost({
+        id: form.id.trim(),
+        author: form.author.trim(),
+    }));
+
+    const onGet = () => runAction(async () => getPost(form.id.trim()));
+
+    const onList = () => runAction(async () => listPosts());
 
     const onCount = () => runAction(async () => {
-        const value = await getCount();
+        const value = await getPostCount();
         setCountValue(String(value));
         return { count: value };
     });
@@ -99,44 +91,53 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 20</p>
+                <h1>Community Platform</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Create posts, like, comment, flag for moderation, and manage community content on-chain.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total posts: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="postId">Post ID (Symbol)</label>
+                <input id="postId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="author">Author Address</label>
+                <input id="author" name="author" value={form.author} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="content">Content</label>
+                <textarea id="content" name="content" rows="4" value={form.content} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} placeholder="general, tech, art..." />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="tags">Tags (comma-separated)</label>
+                <input id="tags" name="tags" value={form.tags} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="liker">Liker Address</label>
+                <input id="liker" name="liker" value={form.liker} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="commenter">Commenter Address</label>
+                <input id="commenter" name="commenter" value={form.commenter} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="commentText">Comment Text</label>
+                <textarea id="commentText" name="commentText" rows="2" value={form.commentText} onChange={setField} />
+
+                <label htmlFor="flagger">Flagger Address</label>
+                <input id="flagger" name="flagger" value={form.flagger} onChange={setField} placeholder="G..." />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreate} disabled={isBusy}>Create Post</button>
+                    <button type="button" onClick={onLike} disabled={isBusy}>Like Post</button>
+                    <button type="button" onClick={onComment} disabled={isBusy}>Comment</button>
+                    <button type="button" onClick={onFlag} disabled={isBusy}>Flag Post</button>
+                    <button type="button" onClick={onRemove} disabled={isBusy}>Remove Post</button>
+                    <button type="button" onClick={onGet} disabled={isBusy}>Get Post</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List Posts</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
                 </div>
             </section>
 

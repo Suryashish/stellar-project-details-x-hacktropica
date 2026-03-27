@@ -7,18 +7,24 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct TaskAssignmentContractItem {
-    pub owner: Address,
+pub struct Task {
+    pub creator: Address,
+    pub assignee: Address,
+    pub reviewer: Address,
     pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+    pub description: String,
+    pub priority: u32,
+    pub status: Symbol,
+    pub estimated_hours: u32,
+    pub actual_hours: u32,
+    pub due_date: u64,
+    pub created_at: u64,
+    pub completed_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum TaskAssignmentContractDataKey {
+pub enum TaskDataKey {
     IdList,
     Item(Symbol),
     Count,
@@ -27,9 +33,15 @@ pub enum TaskAssignmentContractDataKey {
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum TaskAssignmentContractError {
+pub enum TaskError {
     InvalidTitle = 1,
     InvalidTimestamp = 2,
+    NotFound = 3,
+    NotCreator = 4,
+    NotAssignee = 5,
+    InvalidStatus = 6,
+    InvalidPriority = 7,
+    AlreadyCompleted = 8,
 }
 
 #[contract]
@@ -37,31 +49,16 @@ pub struct TaskAssignmentContract;
 
 #[contractimpl]
 impl TaskAssignmentContract {
-    fn count_key() -> TaskAssignmentContractDataKey {
-        TaskAssignmentContractDataKey::Count
+    fn ids_key() -> TaskDataKey {
+        TaskDataKey::IdList
     }
 
-    fn ids_key() -> TaskAssignmentContractDataKey {
-        TaskAssignmentContractDataKey::IdList
+    fn item_key(id: &Symbol) -> TaskDataKey {
+        TaskDataKey::Item(id.clone())
     }
 
-    fn item_key(id: &Symbol) -> TaskAssignmentContractDataKey {
-        TaskAssignmentContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, TaskAssignmentContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, TaskAssignmentContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn count_key() -> TaskDataKey {
+        TaskDataKey::Count
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
@@ -81,23 +78,50 @@ impl TaskAssignmentContract {
         false
     }
 
-    pub fn assign_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    fn increment_count(env: &Env) {
+        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
+        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    }
 
-        let item = TaskAssignmentContractItem {
-            owner,
+    pub fn create_task(
+        env: Env,
+        id: Symbol,
+        creator: Address,
+        title: String,
+        description: String,
+        priority: u32,
+        due_date: u64,
+        estimated_hours: u32,
+    ) {
+        creator.require_auth();
+
+        if title.len() == 0 {
+            panic_with_error!(env, TaskError::InvalidTitle);
+        }
+        if priority > 5 {
+            panic_with_error!(env, TaskError::InvalidPriority);
+        }
+
+        let todo_sym = Symbol::new(&env, "todo");
+
+        let task = Task {
+            creator: creator.clone(),
+            assignee: creator.clone(),
+            reviewer: creator,
             title,
-            notes,
-            state,
-            amount,
-            updated_at,
+            description,
+            priority,
+            status: todo_sym,
+            estimated_hours,
+            actual_hours: 0,
+            due_date,
+            created_at: env.ledger().timestamp(),
+            completed_at: 0,
         };
 
         let key = Self::item_key(&id);
         let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &task);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
@@ -109,32 +133,111 @@ impl TaskAssignmentContract {
         }
     }
 
-    pub fn complete_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<TaskAssignmentContractItem> = env.storage().instance().get(&key);
+    pub fn assign_task(env: Env, id: Symbol, creator: Address, assignee: Address) {
+        creator.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+        let key = Self::item_key(&id);
+        let maybe_task: Option<Task> = env.storage().instance().get(&key);
+
+        if let Some(mut task) = maybe_task {
+            if task.creator != creator {
+                panic_with_error!(env, TaskError::NotCreator);
+            }
+
+            let assigned_sym = Symbol::new(&env, "assigned");
+            task.assignee = assignee;
+            task.status = assigned_sym;
+            env.storage().instance().set(&key, &task);
         } else {
-            false
+            panic_with_error!(env, TaskError::NotFound);
         }
     }
 
-    pub fn review_item(env: Env, id: Symbol) -> Option<TaskAssignmentContractItem> {
+    pub fn start_task(env: Env, id: Symbol, assignee: Address) {
+        assignee.require_auth();
+
+        let key = Self::item_key(&id);
+        let maybe_task: Option<Task> = env.storage().instance().get(&key);
+
+        if let Some(mut task) = maybe_task {
+            if task.assignee != assignee {
+                panic_with_error!(env, TaskError::NotAssignee);
+            }
+
+            let assigned_sym = Symbol::new(&env, "assigned");
+            if task.status != assigned_sym {
+                panic_with_error!(env, TaskError::InvalidStatus);
+            }
+
+            let in_progress_sym = Symbol::new(&env, "in_progress");
+            task.status = in_progress_sym;
+            env.storage().instance().set(&key, &task);
+        } else {
+            panic_with_error!(env, TaskError::NotFound);
+        }
+    }
+
+    pub fn complete_task(env: Env, id: Symbol, assignee: Address, actual_hours: u32) {
+        assignee.require_auth();
+
+        let key = Self::item_key(&id);
+        let maybe_task: Option<Task> = env.storage().instance().get(&key);
+
+        if let Some(mut task) = maybe_task {
+            if task.assignee != assignee {
+                panic_with_error!(env, TaskError::NotAssignee);
+            }
+
+            let in_progress_sym = Symbol::new(&env, "in_progress");
+            if task.status != in_progress_sym {
+                panic_with_error!(env, TaskError::InvalidStatus);
+            }
+
+            let completed_sym = Symbol::new(&env, "completed");
+            task.status = completed_sym;
+            task.actual_hours = actual_hours;
+            task.completed_at = env.ledger().timestamp();
+            env.storage().instance().set(&key, &task);
+        } else {
+            panic_with_error!(env, TaskError::NotFound);
+        }
+    }
+
+    pub fn review_task(env: Env, id: Symbol, reviewer: Address, approved: bool) {
+        reviewer.require_auth();
+
+        let key = Self::item_key(&id);
+        let maybe_task: Option<Task> = env.storage().instance().get(&key);
+
+        if let Some(mut task) = maybe_task {
+            let completed_sym = Symbol::new(&env, "completed");
+            if task.status != completed_sym {
+                panic_with_error!(env, TaskError::InvalidStatus);
+            }
+
+            task.reviewer = reviewer;
+            if approved {
+                let approved_sym = Symbol::new(&env, "approved");
+                task.status = approved_sym;
+            } else {
+                let rejected_sym = Symbol::new(&env, "rejected");
+                task.status = rejected_sym;
+            }
+            env.storage().instance().set(&key, &task);
+        } else {
+            panic_with_error!(env, TaskError::NotFound);
+        }
+    }
+
+    pub fn get_task(env: Env, id: Symbol) -> Option<Task> {
         env.storage().instance().get(&Self::item_key(&id))
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn list_tasks(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
+    pub fn get_task_count(env: Env) -> u32 {
         env.storage().instance().get(&Self::count_key()).unwrap_or(0)
     }
 }

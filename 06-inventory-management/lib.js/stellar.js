@@ -11,6 +11,8 @@ const server = new rpc.Server(RPC_URL);
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
+const toBool = (value) => xdr.ScVal.scvBool(Boolean(value));
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +91,67 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const stockEntry = async (payload) => {
+export const addProduct = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
     if (!payload?.owner) throw new Error("owner address is required");
 
-    return invokeWrite("stock_item", [
+    return invokeWrite("add_product", [
         toSymbol(payload.id),
         new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.name || ""),
+        nativeToScVal(payload.sku || ""),
+        toU32(payload.quantity),
+        toI128(payload.unitPrice),
+        toSymbol(payload.category || "general"),
     ]);
 };
 
-export const sellEntry = async (payload) => {
+export const updateStock = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
 
-    return invokeWrite("sell_item", [
+    return invokeWrite("update_stock", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.owner).toScVal(),
+        toU32(payload.quantityChange),
+        toBool(payload.isAddition),
     ]);
 };
 
-export const auditEntry = async (id) => {
+export const updatePrice = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
+
+    return invokeWrite("update_price", [
+        toSymbol(payload.id),
+        new Address(payload.owner).toScVal(),
+        toI128(payload.newPrice),
+    ]);
+};
+
+export const discontinueProduct = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.owner) throw new Error("owner address is required");
+
+    return invokeWrite("discontinue_product", [
+        toSymbol(payload.id),
+        new Address(payload.owner).toScVal(),
+    ]);
+};
+
+export const getProduct = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("audit_item", [toSymbol(id)]);
+    return invokeRead("get_product", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listProducts = async () => {
+    return invokeRead("list_products", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getLowStock = async (threshold) => {
+    return invokeRead("get_low_stock", [toU32(threshold)]);
+};
+
+export const getTotalValue = async () => {
+    return invokeRead("get_total_value", []);
 };

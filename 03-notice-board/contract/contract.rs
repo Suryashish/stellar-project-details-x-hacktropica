@@ -7,29 +7,36 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct NoticeBoardContractItem {
-    pub owner: Address,
+pub struct Notice {
+    pub author: Address,
     pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+    pub content: String,
+    pub category: Symbol,
+    pub priority: u32,
+    pub pinned: bool,
+    pub removed: bool,
+    pub created_at: u64,
+    pub expires_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum NoticeBoardContractDataKey {
+pub enum NoticeDataKey {
     IdList,
-    Item(Symbol),
+    Notice(Symbol),
     Count,
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum NoticeBoardContractError {
+pub enum NoticeError {
     InvalidTitle = 1,
     InvalidTimestamp = 2,
+    NotFound = 3,
+    AlreadyExists = 4,
+    Unauthorized = 5,
+    AlreadyRemoved = 6,
 }
 
 #[contract]
@@ -37,39 +44,8 @@ pub struct NoticeBoardContract;
 
 #[contractimpl]
 impl NoticeBoardContract {
-    fn count_key() -> NoticeBoardContractDataKey {
-        NoticeBoardContractDataKey::Count
-    }
-
-    fn ids_key() -> NoticeBoardContractDataKey {
-        NoticeBoardContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> NoticeBoardContractDataKey {
-        NoticeBoardContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, NoticeBoardContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, NoticeBoardContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
-    fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
-    }
-
-    fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+    fn notice_key(id: &Symbol) -> NoticeDataKey {
+        NoticeDataKey::Notice(id.clone())
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +57,148 @@ impl NoticeBoardContract {
         false
     }
 
-    pub fn post_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    fn load_ids(env: &Env) -> Vec<Symbol> {
+        env.storage().instance().get(&NoticeDataKey::IdList).unwrap_or(Vec::new(env))
+    }
 
-        let item = NoticeBoardContractItem {
-            owner,
+    fn save_ids(env: &Env, ids: &Vec<Symbol>) {
+        env.storage().instance().set(&NoticeDataKey::IdList, ids);
+    }
+
+    pub fn post_notice(
+        env: Env,
+        id: Symbol,
+        author: Address,
+        title: String,
+        content: String,
+        category: Symbol,
+        priority: u32,
+        expires_at: u64,
+    ) {
+        author.require_auth();
+
+        if title.len() == 0 {
+            panic_with_error!(&env, NoticeError::InvalidTitle);
+        }
+        if expires_at == 0 {
+            panic_with_error!(&env, NoticeError::InvalidTimestamp);
+        }
+
+        let key = Self::notice_key(&id);
+        if env.storage().instance().has(&key) {
+            panic_with_error!(&env, NoticeError::AlreadyExists);
+        }
+
+        let notice = Notice {
+            author,
             title,
-            notes,
-            state,
-            amount,
-            updated_at,
+            content,
+            category,
+            priority,
+            pinned: false,
+            removed: false,
+            created_at: expires_at,
+            expires_at,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &notice);
 
         let mut ids = Self::load_ids(&env);
-        if !Self::has_id(&ids, &id) {
-            ids.push_back(id);
-            Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
+        ids.push_back(id);
+        Self::save_ids(&env, &ids);
+
+        let count: u32 = env.storage().instance().get(&NoticeDataKey::Count).unwrap_or(0);
+        env.storage().instance().set(&NoticeDataKey::Count, &(count + 1));
+    }
+
+    pub fn edit_notice(
+        env: Env,
+        id: Symbol,
+        author: Address,
+        title: String,
+        content: String,
+        category: Symbol,
+        priority: u32,
+    ) {
+        author.require_auth();
+
+        if title.len() == 0 {
+            panic_with_error!(&env, NoticeError::InvalidTitle);
+        }
+
+        let key = Self::notice_key(&id);
+        let maybe: Option<Notice> = env.storage().instance().get(&key);
+
+        if let Some(mut notice) = maybe {
+            if notice.author != author {
+                panic_with_error!(&env, NoticeError::Unauthorized);
             }
-        }
-    }
+            if notice.removed {
+                panic_with_error!(&env, NoticeError::AlreadyRemoved);
+            }
 
-    pub fn browse_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<NoticeBoardContractItem> = env.storage().instance().get(&key);
+            notice.title = title;
+            notice.content = content;
+            notice.category = category;
+            notice.priority = priority;
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+            env.storage().instance().set(&key, &notice);
         } else {
-            false
+            panic_with_error!(&env, NoticeError::NotFound);
         }
     }
 
-    pub fn remove_item(env: Env, id: Symbol) -> Option<NoticeBoardContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn remove_notice(env: Env, id: Symbol, author: Address) {
+        author.require_auth();
+
+        let key = Self::notice_key(&id);
+        let maybe: Option<Notice> = env.storage().instance().get(&key);
+
+        if let Some(mut notice) = maybe {
+            if notice.author != author {
+                panic_with_error!(&env, NoticeError::Unauthorized);
+            }
+            if notice.removed {
+                panic_with_error!(&env, NoticeError::AlreadyRemoved);
+            }
+
+            notice.removed = true;
+            env.storage().instance().set(&key, &notice);
+        } else {
+            panic_with_error!(&env, NoticeError::NotFound);
+        }
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn pin_notice(env: Env, id: Symbol, author: Address) {
+        author.require_auth();
+
+        let key = Self::notice_key(&id);
+        let maybe: Option<Notice> = env.storage().instance().get(&key);
+
+        if let Some(mut notice) = maybe {
+            if notice.author != author {
+                panic_with_error!(&env, NoticeError::Unauthorized);
+            }
+            if notice.removed {
+                panic_with_error!(&env, NoticeError::AlreadyRemoved);
+            }
+
+            notice.pinned = !notice.pinned;
+            env.storage().instance().set(&key, &notice);
+        } else {
+            panic_with_error!(&env, NoticeError::NotFound);
+        }
+    }
+
+    pub fn get_notice(env: Env, id: Symbol) -> Option<Notice> {
+        env.storage().instance().get(&Self::notice_key(&id))
+    }
+
+    pub fn list_notices(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_notice_count(env: Env) -> u32 {
+        env.storage().instance().get(&NoticeDataKey::Count).unwrap_or(0)
     }
 }

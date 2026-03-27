@@ -1,56 +1,34 @@
 import React, { useState } from "react";
-import { checkConnection, requestEntry, acceptEntry, completeEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 17,
-    title: "Service Request System",
-    style: "task-flow",
-    label: "request",
-    writeAction: "request",
-    updateAction: "accept",
-    readAction: "complete",
-};
-
-const nowTs = () => Math.floor(Date.now() / 1000);
-
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
+import { checkConnection, createRequest, acceptRequest, submitWork, approveWork, rejectWork, getRequest, listRequests } from "../lib.js/stellar.js";
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
+
+const initialForm = () => ({
+    id: "req1",
+    requester: "",
+    provider: "",
+    title: "Fix homepage layout",
+    description: "The header overlaps on mobile devices",
+    priority: "3",
+    category: "bugfix",
+    budget: "1000",
+    workNotes: "",
+    reason: "",
+});
 
 export default function App() {
     const [form, setForm] = useState(initialForm);
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
 
     const setField = (event) => {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +44,98 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => requestEntry(payload()));
+    const onCreate = () => runAction(async () => createRequest({
+        id: form.id.trim(),
+        requester: form.requester.trim(),
+        title: form.title.trim(),
+        description: form.description.trim(),
+        priority: form.priority.trim(),
+        category: form.category.trim(),
+        budget: form.budget.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return acceptEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onAccept = () => runAction(async () => acceptRequest({
+        id: form.id.trim(),
+        provider: form.provider.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return completeEntry(next.id);
-    });
+    const onSubmit = () => runAction(async () => submitWork({
+        id: form.id.trim(),
+        provider: form.provider.trim(),
+        workNotes: form.workNotes.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onApprove = () => runAction(async () => approveWork({
+        id: form.id.trim(),
+        requester: form.requester.trim(),
+    }));
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
-        return { count: value };
-    });
+    const onReject = () => runAction(async () => rejectWork({
+        id: form.id.trim(),
+        requester: form.requester.trim(),
+        reason: form.reason.trim(),
+    }));
+
+    const onGet = () => runAction(async () => getRequest(form.id.trim()));
+
+    const onList = () => runAction(async () => listRequests());
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 17</p>
+                <h1>Service Request System</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Create work orders, accept jobs, submit work, and manage approvals on-chain.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="reqId">Request ID (Symbol)</label>
+                <input id="reqId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="requester">Requester Address</label>
+                <input id="requester" name="requester" value={form.requester} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="provider">Provider Address</label>
+                <input id="provider" name="provider" value={form.provider} onChange={setField} placeholder="G..." />
 
                 <label htmlFor="title">Title</label>
                 <input id="title" name="title" value={form.title} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="description">Description</label>
+                <textarea id="description" name="description" rows="3" value={form.description} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="priority">Priority (1-5)</label>
+                <input id="priority" name="priority" value={form.priority} onChange={setField} type="number" min="1" max="5" />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} placeholder="bugfix, feature, support..." />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="budget">Budget (i128)</label>
+                <input id="budget" name="budget" value={form.budget} onChange={setField} type="number" />
+
+                <label htmlFor="workNotes">Work Notes (for submit)</label>
+                <textarea id="workNotes" name="workNotes" rows="3" value={form.workNotes} onChange={setField} />
+
+                <label htmlFor="reason">Rejection Reason</label>
+                <input id="reason" name="reason" value={form.reason} onChange={setField} />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreate} disabled={isBusy}>Create Request</button>
+                    <button type="button" onClick={onAccept} disabled={isBusy}>Accept Request</button>
+                    <button type="button" onClick={onSubmit} disabled={isBusy}>Submit Work</button>
+                    <button type="button" onClick={onApprove} disabled={isBusy}>Approve Work</button>
+                    <button type="button" onClick={onReject} disabled={isBusy}>Reject Work</button>
+                    <button type="button" onClick={onGet} disabled={isBusy}>Get Request</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List Requests</button>
                 </div>
             </section>
 

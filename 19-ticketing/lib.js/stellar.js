@@ -9,8 +9,9 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
-const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
+const toStr = (value) => nativeToScVal(String(value || ""));
+const toAddr = (value) => new Address(value).toScVal();
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +90,72 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const createEntry = async (payload) => {
+export const createTicket = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.reporter) throw new Error("reporter address is required");
 
-    return invokeWrite("create_item", [
+    return invokeWrite("create_ticket", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        toAddr(payload.reporter),
+        toStr(payload.subject),
+        toStr(payload.description),
+        toSymbol(payload.category || "general"),
+        toU32(payload.priority),
     ]);
 };
 
-export const claimEntry = async (payload) => {
+export const assignTicket = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.admin) throw new Error("admin address is required");
+    if (!payload?.assignee) throw new Error("assignee address is required");
 
-    return invokeWrite("claim_item", [
+    return invokeWrite("assign_ticket", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        toAddr(payload.admin),
+        toAddr(payload.assignee),
     ]);
 };
 
-export const resolveEntry = async (id) => {
+export const addResponse = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.responder) throw new Error("responder address is required");
+
+    return invokeWrite("add_response", [
+        toSymbol(payload.id),
+        toAddr(payload.responder),
+        toStr(payload.message),
+    ]);
+};
+
+export const closeTicket = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.closer) throw new Error("closer address is required");
+
+    return invokeWrite("close_ticket", [
+        toSymbol(payload.id),
+        toAddr(payload.closer),
+    ]);
+};
+
+export const reopenTicket = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.reporter) throw new Error("reporter address is required");
+
+    return invokeWrite("reopen_ticket", [
+        toSymbol(payload.id),
+        toAddr(payload.reporter),
+    ]);
+};
+
+export const getTicket = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("resolve_item", [toSymbol(id)]);
+    return invokeRead("get_ticket", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listTickets = async () => {
+    return invokeRead("list_tickets", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getOpenCount = async () => {
+    return invokeRead("get_open_count", []);
 };

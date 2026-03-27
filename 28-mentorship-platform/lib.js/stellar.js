@@ -10,7 +10,8 @@ const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
-const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
+const toBool = (value) => xdr.ScVal.scvBool(Boolean(value));
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +90,76 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const requestEntry = async (payload) => {
+export const registerMentor = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.mentor) throw new Error("mentor address is required");
 
-    return invokeWrite("request_item", [
+    return invokeWrite("register_mentor", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        new Address(payload.mentor).toScVal(),
+        nativeToScVal(payload.name || ""),
+        toSymbol(payload.expertise || "general"),
+        nativeToScVal(payload.bio || ""),
+        toI128(payload.hourlyRate),
+        toU32(payload.maxMentees),
     ]);
 };
 
-export const approveEntry = async (payload) => {
-    if (!payload?.id) throw new Error("id is required");
+export const requestMentorship = async (payload) => {
+    if (!payload?.mentorId) throw new Error("mentorId is required");
+    if (!payload?.mentee) throw new Error("mentee address is required");
 
-    return invokeWrite("approve_item", [
-        toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+    return invokeWrite("request_mentorship", [
+        toSymbol(payload.mentorId),
+        new Address(payload.mentee).toScVal(),
+        nativeToScVal(payload.message || ""),
     ]);
 };
 
-export const completeEntry = async (id) => {
+export const acceptMentee = async (payload) => {
+    if (!payload?.mentorId) throw new Error("mentorId is required");
+    if (!payload?.mentor) throw new Error("mentor address is required");
+    if (!payload?.mentee) throw new Error("mentee address is required");
+
+    return invokeWrite("accept_mentee", [
+        toSymbol(payload.mentorId),
+        new Address(payload.mentor).toScVal(),
+        new Address(payload.mentee).toScVal(),
+    ]);
+};
+
+export const completeSession = async (payload) => {
+    if (!payload?.mentorId) throw new Error("mentorId is required");
+    if (!payload?.mentor) throw new Error("mentor address is required");
+
+    return invokeWrite("complete_session", [
+        toSymbol(payload.mentorId),
+        new Address(payload.mentor).toScVal(),
+        toU32(payload.hours),
+        nativeToScVal(payload.sessionNotes || ""),
+    ]);
+};
+
+export const rateMentor = async (payload) => {
+    if (!payload?.mentorId) throw new Error("mentorId is required");
+    if (!payload?.mentee) throw new Error("mentee address is required");
+
+    return invokeWrite("rate_mentor", [
+        toSymbol(payload.mentorId),
+        new Address(payload.mentee).toScVal(),
+        toU32(payload.rating),
+    ]);
+};
+
+export const getMentor = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("complete_item", [toSymbol(id)]);
+    return invokeRead("get_mentor", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listMentors = async () => {
+    return invokeRead("list_mentors", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getMentorCount = async () => {
+    return invokeRead("get_mentor_count", []);
 };

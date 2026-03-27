@@ -1,32 +1,23 @@
 import React, { useState } from "react";
-import { checkConnection, recordEntry, verifyEntry, settleEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 10,
-    title: "Payment Tracking System",
-    style: "ledger",
-    label: "payment",
-    writeAction: "record",
-    updateAction: "verify",
-    readAction: "settle",
-};
+import { checkConnection, createInvoice, markPaid, markOverdue, cancelInvoice, getInvoice, listInvoices, getTotalOutstanding } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
+const thirtyDaysFromNow = () => nowTs() + 30 * 24 * 60 * 60;
 
 const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
+    id: "inv1",
+    issuer: "",
+    recipient: "",
+    payer: "",
+    description: "Web development services",
+    amount: "10000",
+    paidAmount: "10000",
+    dueDate: String(thirtyDaysFromNow()),
+    paidAt: String(nowTs()),
 });
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
@@ -35,22 +26,11 @@ export default function App() {
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
 
     const setField = (event) => {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +46,98 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => recordEntry(payload()));
+    const onCreateInvoice = () => runAction(async () => createInvoice({
+        id: form.id.trim(),
+        issuer: form.issuer.trim(),
+        recipient: form.recipient.trim(),
+        description: form.description.trim(),
+        amount: form.amount.trim(),
+        dueDate: Number(form.dueDate.trim() || thirtyDaysFromNow()),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return verifyEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onMarkPaid = () => runAction(async () => markPaid({
+        id: form.id.trim(),
+        payer: form.payer.trim(),
+        paidAmount: form.paidAmount.trim(),
+        paidAt: Number(form.paidAt.trim() || nowTs()),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return settleEntry(next.id);
-    });
+    const onMarkOverdue = () => runAction(async () => markOverdue({
+        id: form.id.trim(),
+        issuer: form.issuer.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onCancelInvoice = () => runAction(async () => cancelInvoice({
+        id: form.id.trim(),
+        issuer: form.issuer.trim(),
+    }));
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
-        return { count: value };
-    });
+    const onGetInvoice = () => runAction(async () => getInvoice(form.id.trim()));
+    const onListInvoices = () => runAction(async () => listInvoices());
+    const onGetTotalOutstanding = () => runAction(async () => getTotalOutstanding());
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 10</p>
+                <h1>Payment Tracking System</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Create invoices, track payments, manage overdue accounts, and view outstanding balances.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
+                <h2>Invoice Details</h2>
+
+                <label htmlFor="entryId">Invoice ID (Symbol)</label>
                 <input id="entryId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="issuer">Issuer Address</label>
+                <input id="issuer" name="issuer" value={form.issuer} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="recipient">Recipient Address</label>
+                <input id="recipient" name="recipient" value={form.recipient} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="description">Description</label>
+                <textarea id="description" name="description" rows="2" value={form.description} onChange={setField} />
 
                 <label htmlFor="amount">Amount (i128)</label>
                 <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
-
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="dueDate">Due Date (u64 timestamp)</label>
+                <input id="dueDate" name="dueDate" value={form.dueDate} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateInvoice} disabled={isBusy}>Create Invoice</button>
+                    <button type="button" onClick={onGetInvoice} disabled={isBusy}>Get Invoice</button>
+                    <button type="button" onClick={onListInvoices} disabled={isBusy}>List Invoices</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Payment Actions</h2>
+
+                <label htmlFor="payer">Payer Address</label>
+                <input id="payer" name="payer" value={form.payer} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="paidAmount">Paid Amount (i128)</label>
+                <input id="paidAmount" name="paidAmount" value={form.paidAmount} onChange={setField} type="number" />
+
+                <label htmlFor="paidAt">Paid At (u64 timestamp)</label>
+                <input id="paidAt" name="paidAt" value={form.paidAt} onChange={setField} type="number" />
+
+                <div className="actions">
+                    <button type="button" onClick={onMarkPaid} disabled={isBusy}>Mark Paid</button>
+                    <button type="button" onClick={onMarkOverdue} disabled={isBusy}>Mark Overdue</button>
+                    <button type="button" onClick={onCancelInvoice} disabled={isBusy}>Cancel Invoice</button>
+                    <button type="button" onClick={onGetTotalOutstanding} disabled={isBusy}>Get Total Outstanding</button>
                 </div>
             </section>
 

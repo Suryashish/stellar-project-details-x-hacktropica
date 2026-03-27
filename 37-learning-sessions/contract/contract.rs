@@ -7,29 +7,46 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct LearningSessionsContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct Session {
+    pub tutor: Address,
+    pub subject: String,
+    pub description: String,
+    pub session_date: u64,
+    pub duration_mins: u32,
+    pub price: i128,
+    pub max_attendees: u32,
+    pub booked_count: u32,
+    pub status: Symbol,
+    pub total_rating: u32,
+    pub rating_count: u32,
+    pub total_earned: i128,
+    pub created_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum LearningSessionsContractDataKey {
-    IdList,
-    Item(Symbol),
-    Count,
+pub enum LearningDataKey {
+    SessionList,
+    Session(Symbol),
+    Booked(Symbol, Address),
+    Rated(Symbol, Address),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum LearningSessionsContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum LearningError {
+    SubjectEmpty = 1,
+    InvalidPrice = 2,
+    SessionNotFound = 3,
+    SessionFull = 4,
+    InsufficientPayment = 5,
+    NotTutor = 6,
+    InvalidStatus = 7,
+    InvalidRating = 8,
+    AlreadyBooked = 9,
+    AlreadyRated = 10,
+    NotBooked = 11,
 }
 
 #[contract]
@@ -37,39 +54,24 @@ pub struct LearningSessionsContract;
 
 #[contractimpl]
 impl LearningSessionsContract {
-    fn count_key() -> LearningSessionsContractDataKey {
-        LearningSessionsContractDataKey::Count
+    fn session_key(id: &Symbol) -> LearningDataKey {
+        LearningDataKey::Session(id.clone())
     }
 
-    fn ids_key() -> LearningSessionsContractDataKey {
-        LearningSessionsContractDataKey::IdList
+    fn list_key() -> LearningDataKey {
+        LearningDataKey::SessionList
     }
 
-    fn item_key(id: &Symbol) -> LearningSessionsContractDataKey {
-        LearningSessionsContractDataKey::Item(id.clone())
+    fn booked_key(session_id: &Symbol, student: &Address) -> LearningDataKey {
+        LearningDataKey::Booked(session_id.clone(), student.clone())
     }
 
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, LearningSessionsContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, LearningSessionsContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn rated_key(session_id: &Symbol, student: &Address) -> LearningDataKey {
+        LearningDataKey::Rated(session_id.clone(), student.clone())
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
-    }
-
-    fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().get(&Self::list_key()).unwrap_or(Vec::new(env))
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +83,153 @@ impl LearningSessionsContract {
         false
     }
 
-    pub fn book_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    pub fn create_session(
+        env: Env,
+        id: Symbol,
+        tutor: Address,
+        subject: String,
+        description: String,
+        session_date: u64,
+        duration_mins: u32,
+        price: i128,
+        max_attendees: u32,
+    ) {
+        tutor.require_auth();
 
-        let item = LearningSessionsContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+        if subject.len() == 0 {
+            panic_with_error!(&env, LearningError::SubjectEmpty);
+        }
+        if price < 0 {
+            panic_with_error!(&env, LearningError::InvalidPrice);
+        }
+
+        let session = Session {
+            tutor,
+            subject,
+            description,
+            session_date,
+            duration_mins,
+            price,
+            max_attendees,
+            booked_count: 0,
+            status: Symbol::new(&env, "scheduled"),
+            total_rating: 0,
+            rating_count: 0,
+            total_earned: 0,
+            created_at: env.ledger().timestamp(),
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&Self::session_key(&id), &session);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
-            Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
-            }
+            env.storage().instance().set(&Self::list_key(), &ids);
         }
     }
 
-    pub fn attend_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<LearningSessionsContractItem> = env.storage().instance().get(&key);
+    pub fn book_session(env: Env, session_id: Symbol, student: Address, payment_amount: i128) {
+        student.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        let key = Self::session_key(&session_id);
+        let maybe_session: Option<Session> = env.storage().instance().get(&key);
+        if maybe_session.is_none() {
+            panic_with_error!(&env, LearningError::SessionNotFound);
         }
+        let mut session = maybe_session.unwrap();
+
+        let bk = Self::booked_key(&session_id, &student);
+        let already: bool = env.storage().instance().get(&bk).unwrap_or(false);
+        if already {
+            panic_with_error!(&env, LearningError::AlreadyBooked);
+        }
+
+        if session.booked_count >= session.max_attendees {
+            panic_with_error!(&env, LearningError::SessionFull);
+        }
+        if payment_amount < session.price {
+            panic_with_error!(&env, LearningError::InsufficientPayment);
+        }
+
+        session.booked_count += 1;
+        session.total_earned += payment_amount;
+        env.storage().instance().set(&key, &session);
+        env.storage().instance().set(&bk, &true);
     }
 
-    pub fn rate_item(env: Env, id: Symbol) -> Option<LearningSessionsContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn start_session(env: Env, id: Symbol, tutor: Address) {
+        tutor.require_auth();
+        let key = Self::session_key(&id);
+        let maybe_session: Option<Session> = env.storage().instance().get(&key);
+        if maybe_session.is_none() {
+            panic_with_error!(&env, LearningError::SessionNotFound);
+        }
+        let mut session = maybe_session.unwrap();
+        session.status = Symbol::new(&env, "in_progress");
+        env.storage().instance().set(&key, &session);
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn complete_session(env: Env, id: Symbol, tutor: Address) {
+        tutor.require_auth();
+        let key = Self::session_key(&id);
+        let maybe_session: Option<Session> = env.storage().instance().get(&key);
+        if maybe_session.is_none() {
+            panic_with_error!(&env, LearningError::SessionNotFound);
+        }
+        let mut session = maybe_session.unwrap();
+        session.status = Symbol::new(&env, "completed");
+        env.storage().instance().set(&key, &session);
+    }
+
+    pub fn cancel_session(env: Env, id: Symbol, tutor: Address) {
+        tutor.require_auth();
+        let key = Self::session_key(&id);
+        let maybe_session: Option<Session> = env.storage().instance().get(&key);
+        if maybe_session.is_none() {
+            panic_with_error!(&env, LearningError::SessionNotFound);
+        }
+        let mut session = maybe_session.unwrap();
+        session.status = Symbol::new(&env, "cancelled");
+        env.storage().instance().set(&key, &session);
+    }
+
+    pub fn rate_session(env: Env, id: Symbol, student: Address, rating: u32) {
+        student.require_auth();
+
+        if rating < 1 || rating > 5 {
+            panic_with_error!(&env, LearningError::InvalidRating);
+        }
+
+        let key = Self::session_key(&id);
+        let maybe_session: Option<Session> = env.storage().instance().get(&key);
+        if maybe_session.is_none() {
+            panic_with_error!(&env, LearningError::SessionNotFound);
+        }
+        let mut session = maybe_session.unwrap();
+
+        let bk = Self::booked_key(&id, &student);
+        let booked: bool = env.storage().instance().get(&bk).unwrap_or(false);
+        if !booked {
+            panic_with_error!(&env, LearningError::NotBooked);
+        }
+
+        let rk = Self::rated_key(&id, &student);
+        let already_rated: bool = env.storage().instance().get(&rk).unwrap_or(false);
+        if already_rated {
+            panic_with_error!(&env, LearningError::AlreadyRated);
+        }
+
+        session.total_rating += rating;
+        session.rating_count += 1;
+        env.storage().instance().set(&key, &session);
+        env.storage().instance().set(&rk, &true);
+    }
+
+    pub fn get_session(env: Env, id: Symbol) -> Option<Session> {
+        env.storage().instance().get(&Self::session_key(&id))
+    }
+
+    pub fn list_sessions(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
-    }
-
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
     }
 }

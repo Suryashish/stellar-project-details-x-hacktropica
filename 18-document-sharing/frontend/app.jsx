@@ -1,34 +1,23 @@
 import React, { useState } from "react";
-import { checkConnection, uploadEntry, shareEntry, downloadEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 18,
-    title: "Document Sharing System",
-    style: "file-explorer",
-    label: "document",
-    writeAction: "upload",
-    updateAction: "share",
-    readAction: "download",
-};
-
-const nowTs = () => Math.floor(Date.now() / 1000);
-
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
+import { checkConnection, uploadDoc, shareDoc, revokeAccess, updateDoc, getDoc, listDocs, getDocCount } from "../lib.js/stellar.js";
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
+
+const initialForm = () => ({
+    id: "doc1",
+    owner: "",
+    title: "Project Whitepaper",
+    docHash: "QmXoYpBf7c5e4a1d2b3...",
+    docType: "pdf",
+    fileSize: "2048",
+    sharedWith: "",
+    revokedFrom: "",
+    newHash: "",
+    newSize: "",
+});
 
 export default function App() {
     const [form, setForm] = useState(initialForm);
@@ -41,16 +30,6 @@ export default function App() {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,32 +45,45 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => uploadEntry(payload()));
+    const onUpload = () => runAction(async () => uploadDoc({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        title: form.title.trim(),
+        docHash: form.docHash.trim(),
+        docType: form.docType.trim(),
+        fileSize: form.fileSize.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return shareEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onShare = () => runAction(async () => shareDoc({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        sharedWith: form.sharedWith.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return downloadEntry(next.id);
-    });
+    const onRevoke = () => runAction(async () => revokeAccess({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        revokedFrom: form.revokedFrom.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onUpdate = () => runAction(async () => updateDoc({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        newHash: form.newHash.trim(),
+        newSize: form.newSize.trim(),
+    }));
+
+    const onGet = () => runAction(async () => getDoc(form.id.trim()));
+
+    const onList = () => runAction(async () => listDocs());
 
     const onCount = () => runAction(async () => {
-        const value = await getCount();
+        const value = await getDocCount();
         setCountValue(String(value));
         return { count: value };
     });
@@ -99,44 +91,55 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 18</p>
+                <h1>Document Sharing Registry</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Upload documents, share access, manage versions, and track document metadata on-chain.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total documents: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="docId">Document ID (Symbol)</label>
+                <input id="docId" name="id" value={form.id} onChange={setField} />
 
                 <label htmlFor="owner">Owner Address</label>
                 <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
+                <label htmlFor="title">Document Title</label>
                 <input id="title" name="title" value={form.title} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="docHash">Document Hash</label>
+                <input id="docHash" name="docHash" value={form.docHash} onChange={setField} placeholder="IPFS or content hash" />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="docType">Document Type (Symbol)</label>
+                <input id="docType" name="docType" value={form.docType} onChange={setField} placeholder="pdf, doc, img..." />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="fileSize">File Size (bytes)</label>
+                <input id="fileSize" name="fileSize" value={form.fileSize} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="sharedWith">Share With Address</label>
+                <input id="sharedWith" name="sharedWith" value={form.sharedWith} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="revokedFrom">Revoke From Address</label>
+                <input id="revokedFrom" name="revokedFrom" value={form.revokedFrom} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="newHash">New Hash (for update)</label>
+                <input id="newHash" name="newHash" value={form.newHash} onChange={setField} />
+
+                <label htmlFor="newSize">New Size (for update)</label>
+                <input id="newSize" name="newSize" value={form.newSize} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onUpload} disabled={isBusy}>Upload Document</button>
+                    <button type="button" onClick={onShare} disabled={isBusy}>Share Document</button>
+                    <button type="button" onClick={onRevoke} disabled={isBusy}>Revoke Access</button>
+                    <button type="button" onClick={onUpdate} disabled={isBusy}>Update Version</button>
+                    <button type="button" onClick={onGet} disabled={isBusy}>Get Document</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List Documents</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
                 </div>
             </section>
 

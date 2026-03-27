@@ -1,56 +1,31 @@
 import React, { useState } from "react";
-import { checkConnection, donateEntry, trackEntry, verifyEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 36,
-    title: "Donation Tracker",
-    style: "leaderboard",
-    label: "donation",
-    writeAction: "donate",
-    updateAction: "track",
-    readAction: "verify",
-};
-
-const nowTs = () => Math.floor(Date.now() / 1000);
-
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
+import { checkConnection, createCause, donateToCause, getCause, listCauses, getDonorTotal, getTopDonation, getCauseCount } from "../lib.js/stellar.js";
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "cause1",
+        organizer: "",
+        name: "Community Garden",
+        description: "Fund a local community garden",
+        goalAmount: "10000",
+        donor: "",
+        donationAmount: "500",
+        donationMessage: "Happy to help!",
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
+    const [causeCount, setCauseCount] = useState("-");
 
     const setField = (event) => {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +41,84 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => donateEntry(payload()));
+    const onCreateCause = () => runAction(() => createCause({
+        id: form.id.trim(),
+        organizer: form.organizer.trim(),
+        name: form.name.trim(),
+        description: form.description.trim(),
+        goalAmount: form.goalAmount.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return trackEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onDonate = () => runAction(() => donateToCause({
+        causeId: form.id.trim(),
+        donor: form.donor.trim(),
+        amount: form.donationAmount.trim(),
+        message: form.donationMessage.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return verifyEntry(next.id);
-    });
+    const onGetCause = () => runAction(() => getCause(form.id.trim()));
 
-    const onList = () => runAction(async () => listIds());
+    const onListCauses = () => runAction(() => listCauses());
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
+    const onGetDonorTotal = () => runAction(() => getDonorTotal(form.id.trim(), form.donor.trim()));
+
+    const onGetTopDonation = () => runAction(() => getTopDonation(form.id.trim()));
+
+    const onGetCount = () => runAction(async () => {
+        const value = await getCauseCount();
+        setCauseCount(String(value));
         return { count: value };
     });
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
-                <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
-                </p>
-                <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
+                <p className="kicker">Stellar Soroban Project 36</p>
+                <h1>Donation Tracker</h1>
+                <p className="subtitle">Create causes, donate, and track fundraising progress with a leaderboard.</p>
+                <button type="button" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total causes: {causeCount}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="causeId">Cause ID</label>
+                <input id="causeId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="organizer">Organizer Address</label>
+                <input id="organizer" name="organizer" value={form.organizer} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="name">Cause Name</label>
+                <input id="name" name="name" value={form.name} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="description">Description</label>
+                <textarea id="description" name="description" rows="2" value={form.description} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="goalAmount">Goal Amount (i128)</label>
+                <input id="goalAmount" name="goalAmount" value={form.goalAmount} onChange={setField} type="number" />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="donor">Donor Address</label>
+                <input id="donor" name="donor" value={form.donor} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="donationAmount">Donation Amount (i128)</label>
+                <input id="donationAmount" name="donationAmount" value={form.donationAmount} onChange={setField} type="number" />
+
+                <label htmlFor="donationMessage">Donation Message</label>
+                <input id="donationMessage" name="donationMessage" value={form.donationMessage} onChange={setField} />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreateCause} disabled={isBusy}>Create Cause</button>
+                    <button type="button" onClick={onDonate} disabled={isBusy}>Donate</button>
+                    <button type="button" onClick={onGetCause} disabled={isBusy}>Get Cause</button>
+                    <button type="button" onClick={onListCauses} disabled={isBusy}>List Causes</button>
+                    <button type="button" onClick={onGetDonorTotal} disabled={isBusy}>Donor Total</button>
+                    <button type="button" onClick={onGetTopDonation} disabled={isBusy}>Top Donation</button>
+                    <button type="button" onClick={onGetCount} disabled={isBusy}>Cause Count</button>
                 </div>
             </section>
 

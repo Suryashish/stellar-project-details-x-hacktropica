@@ -11,6 +11,7 @@ const server = new rpc.Server(RPC_URL);
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toBool = (value) => xdr.ScVal.scvBool(Boolean(value));
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +90,70 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const submitEntry = async (payload) => {
+export const createProposal = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.proposer) throw new Error("proposer address is required");
 
-    return invokeWrite("submit_item", [
+    return invokeWrite("create_proposal", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
+        new Address(payload.proposer).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.description || ""),
+        toSymbol(payload.category || "general"),
+        toU64(payload.votingPeriod),
     ]);
 };
 
-export const voteEntry = async (payload) => {
+export const castVote = async (payload) => {
+    if (!payload?.proposalId) throw new Error("proposalId is required");
+    if (!payload?.voter) throw new Error("voter address is required");
+
+    return invokeWrite("cast_vote", [
+        toSymbol(payload.proposalId),
+        new Address(payload.voter).toScVal(),
+        toI128(payload.votePower),
+        toBool(payload.inFavor),
+    ]);
+};
+
+export const executeProposal = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.executor) throw new Error("executor address is required");
 
-    return invokeWrite("vote_item", [
+    return invokeWrite("execute_proposal", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.executor).toScVal(),
     ]);
 };
 
-export const executeEntry = async (id) => {
+export const vetoProposal = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.vetoer) throw new Error("vetoer address is required");
+
+    return invokeWrite("veto_proposal", [
+        toSymbol(payload.id),
+        new Address(payload.vetoer).toScVal(),
+    ]);
+};
+
+export const getProposal = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("execute_item", [toSymbol(id)]);
+    return invokeRead("get_proposal", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listProposals = async () => {
+    return invokeRead("list_proposals", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const hasVoted = async (proposalId, voter) => {
+    if (!proposalId) throw new Error("proposalId is required");
+    if (!voter) throw new Error("voter address is required");
+    return invokeRead("has_voted", [
+        toSymbol(proposalId),
+        new Address(voter).toScVal(),
+    ]);
+};
+
+export const getProposalCount = async () => {
+    return invokeRead("get_proposal_count", []);
 };

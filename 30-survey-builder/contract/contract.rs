@@ -7,29 +7,37 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct SurveyBuilderContractItem {
-    pub owner: Address,
+pub struct Survey {
+    pub creator: Address,
     pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+    pub description: String,
+    pub question_count: u32,
+    pub response_count: u32,
+    pub is_closed: bool,
+    pub created_at: u64,
+    pub end_time: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum SurveyBuilderContractDataKey {
+pub enum DataKey {
     IdList,
-    Item(Symbol),
+    Survey(Symbol),
     Count,
+    Response(Symbol, Address),
+    ResponseCount(Symbol),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum SurveyBuilderContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum ContractError {
+    NotFound = 1,
+    NotAuthorized = 2,
+    InvalidTitle = 3,
+    SurveyClosed = 4,
+    AlreadyResponded = 5,
+    SurveyExpired = 6,
 }
 
 #[contract]
@@ -37,39 +45,12 @@ pub struct SurveyBuilderContract;
 
 #[contractimpl]
 impl SurveyBuilderContract {
-    fn count_key() -> SurveyBuilderContractDataKey {
-        SurveyBuilderContractDataKey::Count
-    }
-
-    fn ids_key() -> SurveyBuilderContractDataKey {
-        SurveyBuilderContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> SurveyBuilderContractDataKey {
-        SurveyBuilderContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, SurveyBuilderContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, SurveyBuilderContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage().instance().get(&DataKey::IdList).unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&DataKey::IdList, ids);
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +62,119 @@ impl SurveyBuilderContract {
         false
     }
 
-    pub fn create_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    pub fn create_survey(
+        env: Env,
+        id: Symbol,
+        creator: Address,
+        title: String,
+        description: String,
+        question_count: u32,
+        end_time: u64,
+    ) {
+        creator.require_auth();
 
-        let item = SurveyBuilderContractItem {
-            owner,
+        if title.len() == 0 {
+            panic_with_error!(&env, ContractError::InvalidTitle);
+        }
+
+        let now = env.ledger().timestamp();
+
+        let survey = Survey {
+            creator,
             title,
-            notes,
-            state,
-            amount,
-            updated_at,
+            description,
+            question_count,
+            response_count: 0,
+            is_closed: false,
+            created_at: now,
+            end_time,
         };
 
-        let key = Self::item_key(&id);
+        let key = DataKey::Survey(id.clone());
         let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&key, &survey);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
             if !exists {
-                Self::increment_count(&env);
+                let count: u32 = env.storage().instance().get(&DataKey::Count).unwrap_or(0);
+                env.storage().instance().set(&DataKey::Count, &(count + 1));
             }
         }
     }
 
-    pub fn distribute_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<SurveyBuilderContractItem> = env.storage().instance().get(&key);
+    pub fn submit_response(
+        env: Env,
+        survey_id: Symbol,
+        respondent: Address,
+        answers: String,
+    ) {
+        respondent.require_auth();
+        let _ = answers;
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        let key = DataKey::Survey(survey_id.clone());
+        let mut survey: Survey = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotFound));
+
+        if survey.is_closed {
+            panic_with_error!(&env, ContractError::SurveyClosed);
         }
+
+        let now = env.ledger().timestamp();
+        if now > survey.end_time {
+            panic_with_error!(&env, ContractError::SurveyExpired);
+        }
+
+        let resp_key = DataKey::Response(survey_id.clone(), respondent.clone());
+        if env.storage().instance().has(&resp_key) {
+            panic_with_error!(&env, ContractError::AlreadyResponded);
+        }
+
+        env.storage().instance().set(&resp_key, &true);
+        survey.response_count += 1;
+        env.storage().instance().set(&key, &survey);
     }
 
-    pub fn analyze_item(env: Env, id: Symbol) -> Option<SurveyBuilderContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn close_survey(env: Env, id: Symbol, creator: Address) {
+        creator.require_auth();
+
+        let key = DataKey::Survey(id.clone());
+        let mut survey: Survey = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::NotFound));
+
+        if survey.creator != creator {
+            panic_with_error!(&env, ContractError::NotAuthorized);
+        }
+
+        survey.is_closed = true;
+        env.storage().instance().set(&key, &survey);
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn get_survey(env: Env, id: Symbol) -> Option<Survey> {
+        env.storage().instance().get(&DataKey::Survey(id))
+    }
+
+    pub fn list_surveys(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_response_count(env: Env, survey_id: Symbol) -> u32 {
+        let key = DataKey::Survey(survey_id);
+        let survey: Option<Survey> = env.storage().instance().get(&key);
+        match survey {
+            Some(s) => s.response_count,
+            None => 0,
+        }
+    }
+
+    pub fn has_responded(env: Env, survey_id: Symbol, respondent: Address) -> bool {
+        let resp_key = DataKey::Response(survey_id, respondent);
+        env.storage().instance().has(&resp_key)
+    }
+
+    pub fn get_survey_count(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::Count).unwrap_or(0)
     }
 }

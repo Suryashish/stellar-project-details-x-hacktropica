@@ -89,41 +89,71 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const enrollEntry = async (payload) => {
+export const registerMember = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.member) throw new Error("member address is required");
 
-    return invokeWrite("enroll_item", [
+    return invokeWrite("register_member", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        new Address(payload.member).toScVal(),
+        nativeToScVal(payload.name || ""),
+        nativeToScVal(payload.email || ""),
+        toSymbol(payload.tier || "basic"),
+        toU64(payload.joinedAt),
     ]);
 };
 
-export const updateEntry = async (payload) => {
+export const upgradeTier = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.member) throw new Error("member address is required");
 
-    return invokeWrite("update_item", [
+    return invokeWrite("upgrade_tier", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.member).toScVal(),
+        toSymbol(payload.newTier),
     ]);
 };
 
-export const revokeEntry = async (id) => {
+export const renewMembership = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.member) throw new Error("member address is required");
+
+    return invokeWrite("renew_membership", [
+        toSymbol(payload.id),
+        new Address(payload.member).toScVal(),
+        toU64(payload.newExpiry),
+    ]);
+};
+
+export const suspendMember = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.admin) throw new Error("admin address is required");
+
+    return invokeWrite("suspend_member", [
+        toSymbol(payload.id),
+        new Address(payload.admin).toScVal(),
+    ]);
+};
+
+export const activateMember = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.admin) throw new Error("admin address is required");
+
+    return invokeWrite("activate_member", [
+        toSymbol(payload.id),
+        new Address(payload.admin).toScVal(),
+    ]);
+};
+
+export const getMember = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("revoke_item", [toSymbol(id)]);
+    return invokeRead("get_member", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listMembers = async () => {
+    return invokeRead("list_members", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getMemberCount = async () => {
+    return invokeRead("get_member_count", []);
 };

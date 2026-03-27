@@ -11,6 +11,7 @@ const server = new rpc.Server(RPC_URL);
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
 const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +90,66 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const publishEntry = async (payload) => {
+export const createAd = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.advertiser) throw new Error("advertiser address is required");
 
-    return invokeWrite("publish_item", [
+    return invokeWrite("create_ad", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
+        new Address(payload.advertiser).toScVal(),
         nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.content || ""),
+        toSymbol(payload.targetAudience || "general"),
+        toI128(payload.budget),
+        toI128(payload.costPerView),
     ]);
 };
 
-export const promoteEntry = async (payload) => {
-    if (!payload?.id) throw new Error("id is required");
-
-    return invokeWrite("promote_item", [
-        toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
-    ]);
-};
-
-export const reportEntry = async (id) => {
+export const approveAd = async (id, publisher) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("report_item", [toSymbol(id)]);
+    if (!publisher) throw new Error("publisher address is required");
+    return invokeWrite("approve_ad", [
+        toSymbol(id),
+        new Address(publisher).toScVal(),
+    ]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const recordView = async (id, viewer) => {
+    if (!id) throw new Error("id is required");
+    if (!viewer) throw new Error("viewer address is required");
+    return invokeWrite("record_view", [
+        toSymbol(id),
+        new Address(viewer).toScVal(),
+    ]);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const pauseAd = async (id, advertiser) => {
+    if (!id) throw new Error("id is required");
+    if (!advertiser) throw new Error("advertiser address is required");
+    return invokeWrite("pause_ad", [
+        toSymbol(id),
+        new Address(advertiser).toScVal(),
+    ]);
+};
+
+export const resumeAd = async (id, advertiser) => {
+    if (!id) throw new Error("id is required");
+    if (!advertiser) throw new Error("advertiser address is required");
+    return invokeWrite("resume_ad", [
+        toSymbol(id),
+        new Address(advertiser).toScVal(),
+    ]);
+};
+
+export const getAd = async (id) => {
+    if (!id) throw new Error("id is required");
+    return invokeRead("get_ad", [toSymbol(id)]);
+};
+
+export const listAds = async () => {
+    return invokeRead("list_ads", []);
+};
+
+export const getAdCount = async () => {
+    return invokeRead("get_ad_count", []);
 };

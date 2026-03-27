@@ -7,29 +7,48 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct LearningPlatformContractItem {
-    pub owner: Address,
+pub struct Course {
+    pub instructor: Address,
     pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+    pub description: String,
+    pub category: Symbol,
+    pub max_students: u32,
+    pub enrolled_count: u32,
+    pub completed_count: u32,
+    pub price: i128,
+    pub total_rating: u32,
+    pub rating_count: u32,
+    pub created_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum LearningPlatformContractDataKey {
+pub enum EnrollmentStatus {
+    Enrolled,
+    Completed,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKey {
     IdList,
-    Item(Symbol),
-    Count,
+    Course(Symbol),
+    Enrollment(Symbol, Address),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum LearningPlatformContractError {
+pub enum ContractError {
     InvalidTitle = 1,
     InvalidTimestamp = 2,
+    CourseNotFound = 3,
+    CourseFull = 4,
+    AlreadyEnrolled = 5,
+    NotEnrolled = 6,
+    AlreadyCompleted = 7,
+    InvalidRating = 8,
+    NotCompleted = 9,
 }
 
 #[contract]
@@ -37,31 +56,16 @@ pub struct LearningPlatformContract;
 
 #[contractimpl]
 impl LearningPlatformContract {
-    fn count_key() -> LearningPlatformContractDataKey {
-        LearningPlatformContractDataKey::Count
+    fn ids_key() -> DataKey {
+        DataKey::IdList
     }
 
-    fn ids_key() -> LearningPlatformContractDataKey {
-        LearningPlatformContractDataKey::IdList
+    fn course_key(id: &Symbol) -> DataKey {
+        DataKey::Course(id.clone())
     }
 
-    fn item_key(id: &Symbol) -> LearningPlatformContractDataKey {
-        LearningPlatformContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, LearningPlatformContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, LearningPlatformContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn enrollment_key(course_id: &Symbol, student: &Address) -> DataKey {
+        DataKey::Enrollment(course_id.clone(), student.clone())
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
@@ -81,60 +85,129 @@ impl LearningPlatformContract {
         false
     }
 
-    pub fn enroll_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    pub fn create_course(
+        env: Env,
+        id: Symbol,
+        instructor: Address,
+        title: String,
+        description: String,
+        category: Symbol,
+        max_students: u32,
+        price: i128,
+    ) {
+        instructor.require_auth();
 
-        let item = LearningPlatformContractItem {
-            owner,
+        if title.len() == 0 {
+            panic_with_error!(&env, ContractError::InvalidTitle);
+        }
+
+        let now = env.ledger().timestamp();
+
+        let course = Course {
+            instructor,
             title,
-            notes,
-            state,
-            amount,
-            updated_at,
+            description,
+            category,
+            max_students,
+            enrolled_count: 0,
+            completed_count: 0,
+            price,
+            total_rating: 0,
+            rating_count: 0,
+            created_at: now,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        let key = Self::course_key(&id);
+        env.storage().instance().set(&key, &course);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
-            }
         }
     }
 
-    pub fn progress_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<LearningPlatformContractItem> = env.storage().instance().get(&key);
+    pub fn enroll_student(env: Env, course_id: Symbol, student: Address) {
+        student.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        let key = Self::course_key(&course_id);
+        let mut course: Course = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::CourseNotFound));
+
+        let enroll_key = Self::enrollment_key(&course_id, &student);
+        if env.storage().instance().has(&enroll_key) {
+            panic_with_error!(&env, ContractError::AlreadyEnrolled);
         }
+
+        if course.enrolled_count >= course.max_students {
+            panic_with_error!(&env, ContractError::CourseFull);
+        }
+
+        course.enrolled_count = course.enrolled_count + 1;
+        env.storage().instance().set(&key, &course);
+        env.storage().instance().set(&enroll_key, &EnrollmentStatus::Enrolled);
     }
 
-    pub fn complete_item(env: Env, id: Symbol) -> Option<LearningPlatformContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn complete_course(env: Env, course_id: Symbol, student: Address) {
+        student.require_auth();
+
+        let key = Self::course_key(&course_id);
+        let mut course: Course = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::CourseNotFound));
+
+        let enroll_key = Self::enrollment_key(&course_id, &student);
+        let status: Option<EnrollmentStatus> = env.storage().instance().get(&enroll_key);
+
+        match status {
+            None => panic_with_error!(&env, ContractError::NotEnrolled),
+            Some(EnrollmentStatus::Completed) => panic_with_error!(&env, ContractError::AlreadyCompleted),
+            Some(EnrollmentStatus::Enrolled) => {}
+        }
+
+        course.completed_count = course.completed_count + 1;
+        env.storage().instance().set(&key, &course);
+        env.storage().instance().set(&enroll_key, &EnrollmentStatus::Completed);
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn rate_course(env: Env, course_id: Symbol, student: Address, rating: u32) {
+        student.require_auth();
+
+        if rating < 1 || rating > 5 {
+            panic_with_error!(&env, ContractError::InvalidRating);
+        }
+
+        let key = Self::course_key(&course_id);
+        let mut course: Course = env.storage().instance().get(&key)
+            .unwrap_or_else(|| panic_with_error!(&env, ContractError::CourseNotFound));
+
+        let enroll_key = Self::enrollment_key(&course_id, &student);
+        let status: Option<EnrollmentStatus> = env.storage().instance().get(&enroll_key);
+
+        match status {
+            None => panic_with_error!(&env, ContractError::NotEnrolled),
+            Some(EnrollmentStatus::Enrolled) => panic_with_error!(&env, ContractError::NotCompleted),
+            Some(EnrollmentStatus::Completed) => {}
+        }
+
+        course.total_rating = course.total_rating + rating;
+        course.rating_count = course.rating_count + 1;
+        env.storage().instance().set(&key, &course);
+    }
+
+    pub fn get_course(env: Env, id: Symbol) -> Option<Course> {
+        env.storage().instance().get(&Self::course_key(&id))
+    }
+
+    pub fn list_courses(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_enrollment_count(env: Env, course_id: Symbol) -> u32 {
+        let key = Self::course_key(&course_id);
+        if let Some(course) = env.storage().instance().get::<DataKey, Course>(&key) {
+            course.enrolled_count
+        } else {
+            0
+        }
     }
 }

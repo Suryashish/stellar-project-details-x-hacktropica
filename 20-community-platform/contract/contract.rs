@@ -7,29 +7,35 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct CommunityPlatformContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
-    pub updated_at: u64,
+pub struct Post {
+    pub author: Address,
+    pub content: String,
+    pub category: Symbol,
+    pub tags: String,
+    pub like_count: u32,
+    pub comment_count: u32,
+    pub flag_count: u32,
+    pub is_removed: bool,
+    pub created_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum CommunityPlatformContractDataKey {
+pub enum DataKey {
     IdList,
-    Item(Symbol),
+    Post(Symbol),
     Count,
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum CommunityPlatformContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum CommunityError {
+    NotFound = 1,
+    NotAuthor = 2,
+    AlreadyExists = 3,
+    InvalidContent = 4,
+    PostRemoved = 5,
 }
 
 #[contract]
@@ -37,39 +43,12 @@ pub struct CommunityPlatformContract;
 
 #[contractimpl]
 impl CommunityPlatformContract {
-    fn count_key() -> CommunityPlatformContractDataKey {
-        CommunityPlatformContractDataKey::Count
-    }
-
-    fn ids_key() -> CommunityPlatformContractDataKey {
-        CommunityPlatformContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> CommunityPlatformContractDataKey {
-        CommunityPlatformContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, CommunityPlatformContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, CommunityPlatformContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
-    }
-
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
+        env.storage().instance().get(&DataKey::IdList).unwrap_or(Vec::new(env))
     }
 
     fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().set(&DataKey::IdList, ids);
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +60,126 @@ impl CommunityPlatformContract {
         false
     }
 
-    pub fn post_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    pub fn create_post(
+        env: Env,
+        id: Symbol,
+        author: Address,
+        content: String,
+        category: Symbol,
+        tags: String,
+    ) {
+        author.require_auth();
 
-        let item = CommunityPlatformContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+        if content.len() == 0 {
+            panic_with_error!(&env, CommunityError::InvalidContent);
+        }
+
+        let key = DataKey::Post(id.clone());
+        if env.storage().instance().has(&key) {
+            panic_with_error!(&env, CommunityError::AlreadyExists);
+        }
+
+        let post = Post {
+            author,
+            content,
+            category,
+            tags,
+            like_count: 0,
+            comment_count: 0,
+            flag_count: 0,
+            is_removed: false,
+            created_at: env.ledger().timestamp(),
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
+        env.storage().instance().set(&key, &post);
 
-        env.storage().instance().set(&key, &item);
+        let count: u32 = env.storage().instance().get(&DataKey::Count).unwrap_or(0);
+        env.storage().instance().set(&DataKey::Count, &(count + 1));
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
             Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
+        }
+    }
+
+    pub fn like_post(env: Env, id: Symbol, liker: Address) {
+        liker.require_auth();
+
+        let key = DataKey::Post(id.clone());
+        let maybe: Option<Post> = env.storage().instance().get(&key);
+
+        if let Some(mut post) = maybe {
+            if post.is_removed {
+                panic_with_error!(&env, CommunityError::PostRemoved);
             }
-        }
-    }
-
-    pub fn reply_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<CommunityPlatformContractItem> = env.storage().instance().get(&key);
-
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
+            post.like_count += 1;
+            env.storage().instance().set(&key, &post);
         } else {
-            false
+            panic_with_error!(&env, CommunityError::NotFound);
         }
     }
 
-    pub fn moderate_item(env: Env, id: Symbol) -> Option<CommunityPlatformContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn comment_post(env: Env, id: Symbol, commenter: Address, _comment_text: String) {
+        commenter.require_auth();
+
+        let key = DataKey::Post(id.clone());
+        let maybe: Option<Post> = env.storage().instance().get(&key);
+
+        if let Some(mut post) = maybe {
+            if post.is_removed {
+                panic_with_error!(&env, CommunityError::PostRemoved);
+            }
+            post.comment_count += 1;
+            env.storage().instance().set(&key, &post);
+        } else {
+            panic_with_error!(&env, CommunityError::NotFound);
+        }
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn flag_post(env: Env, id: Symbol, flagger: Address) {
+        flagger.require_auth();
+
+        let key = DataKey::Post(id.clone());
+        let maybe: Option<Post> = env.storage().instance().get(&key);
+
+        if let Some(mut post) = maybe {
+            if post.is_removed {
+                panic_with_error!(&env, CommunityError::PostRemoved);
+            }
+            post.flag_count += 1;
+            env.storage().instance().set(&key, &post);
+        } else {
+            panic_with_error!(&env, CommunityError::NotFound);
+        }
+    }
+
+    pub fn remove_post(env: Env, id: Symbol, author: Address) {
+        author.require_auth();
+
+        let key = DataKey::Post(id.clone());
+        let maybe: Option<Post> = env.storage().instance().get(&key);
+
+        if let Some(mut post) = maybe {
+            if post.author != author {
+                panic_with_error!(&env, CommunityError::NotAuthor);
+            }
+            post.is_removed = true;
+            env.storage().instance().set(&key, &post);
+        } else {
+            panic_with_error!(&env, CommunityError::NotFound);
+        }
+    }
+
+    pub fn get_post(env: Env, id: Symbol) -> Option<Post> {
+        env.storage().instance().get(&DataKey::Post(id))
+    }
+
+    pub fn list_posts(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
     }
 
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
+    pub fn get_post_count(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::Count).unwrap_or(0)
     }
 }

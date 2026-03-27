@@ -9,8 +9,8 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
-const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toStr = (value) => nativeToScVal(String(value || ""));
+const toAddr = (value) => new Address(value).toScVal();
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,41 +89,69 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const postEntry = async (payload) => {
+export const createPost = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.author) throw new Error("author address is required");
 
-    return invokeWrite("post_item", [
+    return invokeWrite("create_post", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        toAddr(payload.author),
+        toStr(payload.content),
+        toSymbol(payload.category || "general"),
+        toStr(payload.tags),
     ]);
 };
 
-export const replyEntry = async (payload) => {
+export const likePost = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.liker) throw new Error("liker address is required");
 
-    return invokeWrite("reply_item", [
+    return invokeWrite("like_post", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        toAddr(payload.liker),
     ]);
 };
 
-export const moderateEntry = async (id) => {
+export const commentPost = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.commenter) throw new Error("commenter address is required");
+
+    return invokeWrite("comment_post", [
+        toSymbol(payload.id),
+        toAddr(payload.commenter),
+        toStr(payload.commentText),
+    ]);
+};
+
+export const flagPost = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.flagger) throw new Error("flagger address is required");
+
+    return invokeWrite("flag_post", [
+        toSymbol(payload.id),
+        toAddr(payload.flagger),
+    ]);
+};
+
+export const removePost = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.author) throw new Error("author address is required");
+
+    return invokeWrite("remove_post", [
+        toSymbol(payload.id),
+        toAddr(payload.author),
+    ]);
+};
+
+export const getPost = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("moderate_item", [toSymbol(id)]);
+    return invokeRead("get_post", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listPosts = async () => {
+    return invokeRead("list_posts", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const getPostCount = async () => {
+    return invokeRead("get_post_count", []);
 };

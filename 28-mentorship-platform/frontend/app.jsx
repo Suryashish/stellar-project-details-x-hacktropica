@@ -1,37 +1,28 @@
 import React, { useState } from "react";
-import { checkConnection, requestEntry, approveEntry, completeEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 28,
-    title: "Mentorship Platform",
-    style: "profile-card",
-    label: "session",
-    writeAction: "request",
-    updateAction: "approve",
-    readAction: "complete",
-};
+import { checkConnection, registerMentor, requestMentorship, acceptMentee, completeSession, rateMentor, getMentor, listMentors, getMentorCount } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
-
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
 export default function App() {
-    const [form, setForm] = useState(initialForm);
+    const [form, setForm] = useState({
+        id: "mentor1",
+        mentor: "",
+        name: "Alice",
+        expertise: "rust",
+        bio: "Experienced Soroban developer",
+        hourlyRate: "100",
+        maxMentees: "5",
+        mentee: "",
+        message: "I'd like to learn Soroban",
+        hours: "2",
+        sessionNotes: "Covered contract basics",
+        rating: "5",
+    });
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
@@ -41,16 +32,6 @@ export default function App() {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -71,27 +52,47 @@ export default function App() {
         return nextWalletState;
     });
 
-    const onWrite = () => runAction(async () => requestEntry(payload()));
+    const onRegister = () => runAction(async () => registerMentor({
+        id: form.id.trim(),
+        mentor: form.mentor.trim(),
+        name: form.name.trim(),
+        expertise: form.expertise.trim(),
+        bio: form.bio.trim(),
+        hourlyRate: form.hourlyRate.trim(),
+        maxMentees: form.maxMentees.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return approveEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onRequestMentorship = () => runAction(async () => requestMentorship({
+        mentorId: form.id.trim(),
+        mentee: form.mentee.trim(),
+        message: form.message.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return completeEntry(next.id);
-    });
+    const onAcceptMentee = () => runAction(async () => acceptMentee({
+        mentorId: form.id.trim(),
+        mentor: form.mentor.trim(),
+        mentee: form.mentee.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onCompleteSession = () => runAction(async () => completeSession({
+        mentorId: form.id.trim(),
+        mentor: form.mentor.trim(),
+        hours: form.hours.trim(),
+        sessionNotes: form.sessionNotes.trim(),
+    }));
+
+    const onRate = () => runAction(async () => rateMentor({
+        mentorId: form.id.trim(),
+        mentee: form.mentee.trim(),
+        rating: form.rating.trim(),
+    }));
+
+    const onGetMentor = () => runAction(async () => getMentor(form.id.trim()));
+
+    const onList = () => runAction(async () => listMentors());
 
     const onCount = () => runAction(async () => {
-        const value = await getCount();
+        const value = await getMentorCount();
         setCountValue(String(value));
         return { count: value };
     });
@@ -99,44 +100,73 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
-                <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
-                </p>
+                <p className="kicker">Stellar Soroban Project 28</p>
+                <h1>Mentorship Platform</h1>
+                <p className="subtitle">Register mentors, request mentorship, complete sessions, and rate mentors.</p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Registered mentor count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <h2>Mentor Registration</h2>
+                <label htmlFor="id">Mentor ID (Symbol)</label>
+                <input id="id" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="mentor">Mentor Address</label>
+                <input id="mentor" name="mentor" value={form.mentor} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="name">Name</label>
+                <input id="name" name="name" value={form.name} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="expertise">Expertise (Symbol)</label>
+                <input id="expertise" name="expertise" value={form.expertise} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="bio">Bio</label>
+                <textarea id="bio" name="bio" rows="2" value={form.bio} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="hourlyRate">Hourly Rate (i128)</label>
+                <input id="hourlyRate" name="hourlyRate" value={form.hourlyRate} onChange={setField} type="number" />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="maxMentees">Max Mentees</label>
+                <input id="maxMentees" name="maxMentees" value={form.maxMentees} onChange={setField} type="number" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onRegister} disabled={isBusy}>Register Mentor</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Mentorship Actions</h2>
+                <label htmlFor="mentee">Mentee Address</label>
+                <input id="mentee" name="mentee" value={form.mentee} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="message">Request Message</label>
+                <input id="message" name="message" value={form.message} onChange={setField} />
+
+                <label htmlFor="hours">Session Hours</label>
+                <input id="hours" name="hours" value={form.hours} onChange={setField} type="number" />
+
+                <label htmlFor="sessionNotes">Session Notes</label>
+                <textarea id="sessionNotes" name="sessionNotes" rows="2" value={form.sessionNotes} onChange={setField} />
+
+                <label htmlFor="rating">Rating (1-5)</label>
+                <input id="rating" name="rating" value={form.rating} onChange={setField} type="number" min="1" max="5" />
+
+                <div className="actions">
+                    <button type="button" onClick={onRequestMentorship} disabled={isBusy}>Request Mentorship</button>
+                    <button type="button" onClick={onAcceptMentee} disabled={isBusy}>Accept Mentee</button>
+                    <button type="button" onClick={onCompleteSession} disabled={isBusy}>Complete Session</button>
+                    <button type="button" onClick={onRate} disabled={isBusy}>Rate Mentor</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Read Operations</h2>
+                <div className="actions">
+                    <button type="button" onClick={onGetMentor} disabled={isBusy}>Get Mentor</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List Mentors</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
                 </div>
             </section>
 

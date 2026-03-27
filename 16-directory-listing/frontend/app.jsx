@@ -1,56 +1,37 @@
 import React, { useState } from "react";
-import { checkConnection, registerEntry, searchEntry, updateEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 16,
-    title: "Directory / Listing Platform",
-    style: "clean-sidebar",
-    label: "entry",
-    writeAction: "register",
-    updateAction: "search",
-    readAction: "update",
-};
+import { checkConnection, createListing, updateListing, verifyListing, deactivateListing, rateListing, getListing, listAll } from "../lib.js/stellar.js";
 
 const nowTs = () => Math.floor(Date.now() / 1000);
 
-const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
-});
-
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
+
+const initialForm = () => ({
+    id: "biz1",
+    owner: "",
+    name: "Stellar Coffee Shop",
+    category: "food",
+    description: "Best coffee in town",
+    contact: "hello@stellarcoffee.io",
+    website: "https://stellarcoffee.io",
+    location: "123 Main St, Blockchain City",
+    verifier: "",
+    rater: "",
+    rating: "5",
+});
 
 export default function App() {
     const [form, setForm] = useState(initialForm);
     const [output, setOutput] = useState("Ready.");
     const [walletState, setWalletState] = useState("Wallet: not connected");
     const [isBusy, setIsBusy] = useState(false);
-    const [countValue, setCountValue] = useState("-");
 
     const setField = (event) => {
         const { name, value } = event.target;
         setForm((prev) => ({ ...prev, [name]: value }));
     };
-
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
 
     const runAction = async (action) => {
         setIsBusy(true);
@@ -66,77 +47,105 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => registerEntry(payload()));
+    const onCreate = () => runAction(async () => createListing({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        name: form.name.trim(),
+        category: form.category.trim(),
+        description: form.description.trim(),
+        contact: form.contact.trim(),
+        website: form.website.trim(),
+        location: form.location.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return searchEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onUpdate = () => runAction(async () => updateListing({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+        name: form.name.trim(),
+        description: form.description.trim(),
+        contact: form.contact.trim(),
+        website: form.website.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return updateEntry(next.id);
-    });
+    const onVerify = () => runAction(async () => verifyListing({
+        id: form.id.trim(),
+        verifier: form.verifier.trim() || form.owner.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onDeactivate = () => runAction(async () => deactivateListing({
+        id: form.id.trim(),
+        owner: form.owner.trim(),
+    }));
 
-    const onCount = () => runAction(async () => {
-        const value = await getCount();
-        setCountValue(String(value));
-        return { count: value };
-    });
+    const onRate = () => runAction(async () => rateListing({
+        id: form.id.trim(),
+        rater: form.rater.trim() || form.owner.trim(),
+        rating: form.rating.trim(),
+    }));
+
+    const onGet = () => runAction(async () => getListing(form.id.trim()));
+
+    const onList = () => runAction(async () => listAll());
 
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 16</p>
+                <h1>Business Directory</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    Create, verify, rate, and manage business/service listings on-chain.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
-                <input id="entryId" name="id" value={form.id} onChange={setField} />
+                <label htmlFor="listingId">Listing ID (Symbol)</label>
+                <input id="listingId" name="id" value={form.id} onChange={setField} />
 
                 <label htmlFor="owner">Owner Address</label>
                 <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="name">Business Name</label>
+                <input id="name" name="name" value={form.name} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} placeholder="food, retail, tech..." />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="description">Description</label>
+                <textarea id="description" name="description" rows="3" value={form.description} onChange={setField} />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
+                <label htmlFor="contact">Contact</label>
+                <input id="contact" name="contact" value={form.contact} onChange={setField} />
 
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="website">Website</label>
+                <input id="website" name="website" value={form.website} onChange={setField} />
+
+                <label htmlFor="location">Location</label>
+                <input id="location" name="location" value={form.location} onChange={setField} />
+
+                <label htmlFor="verifier">Verifier Address (for verify action)</label>
+                <input id="verifier" name="verifier" value={form.verifier} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="rater">Rater Address (for rate action)</label>
+                <input id="rater" name="rater" value={form.rater} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="rating">Rating (1-5)</label>
+                <input id="rating" name="rating" value={form.rating} onChange={setField} type="number" min="1" max="5" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onCreate} disabled={isBusy}>Create Listing</button>
+                    <button type="button" onClick={onUpdate} disabled={isBusy}>Update Listing</button>
+                    <button type="button" onClick={onVerify} disabled={isBusy}>Verify Listing</button>
+                    <button type="button" onClick={onDeactivate} disabled={isBusy}>Deactivate</button>
+                    <button type="button" onClick={onRate} disabled={isBusy}>Rate Listing</button>
+                    <button type="button" onClick={onGet} disabled={isBusy}>Get Listing</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List All</button>
                 </div>
             </section>
 

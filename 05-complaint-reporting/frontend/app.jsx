@@ -1,32 +1,21 @@
 import React, { useState } from "react";
-import { checkConnection, submitEntry, trackEntry, resolveEntry, listIds, getCount } from "../lib.js/stellar.js";
-
-const meta = {
-    number: 5,
-    title: "Complaint / Issue Reporting System",
-    style: "progressive",
-    label: "complaint",
-    writeAction: "submit",
-    updateAction: "track",
-    readAction: "resolve",
-};
-
-const nowTs = () => Math.floor(Date.now() / 1000);
+import { checkConnection, fileComplaint, assignComplaint, resolveComplaint, escalateComplaint, getComplaint, listComplaints, getComplaintCount } from "../lib.js/stellar.js";
 
 const initialForm = () => ({
-    id: `${meta.label}1`,
-    owner: "",
-    title: `Sample ${meta.label}`,
-    state: "open",
-    amount: "0",
-    updatedAt: String(nowTs()),
-    notes: "Created from frontend",
+    id: "case1",
+    reporter: "",
+    subject: "Service Disruption",
+    description: "Detailed description of the complaint or issue.",
+    category: "service",
+    severity: "1",
+    admin: "",
+    assignee: "",
+    handler: "",
+    resolutionNotes: "",
 });
 
 const toOutput = (value) => {
-    if (typeof value === "string") {
-        return value;
-    }
+    if (typeof value === "string") return value;
     return JSON.stringify(value, null, 2);
 };
 
@@ -42,16 +31,6 @@ export default function App() {
         setForm((prev) => ({ ...prev, [name]: value }));
     };
 
-    const payload = () => ({
-        id: form.id.trim(),
-        owner: form.owner.trim(),
-        title: form.title.trim(),
-        notes: form.notes.trim(),
-        state: form.state.trim() || "open",
-        amount: form.amount.trim() || "0",
-        updatedAt: Number(form.updatedAt.trim() || nowTs()),
-    });
-
     const runAction = async (action) => {
         setIsBusy(true);
         try {
@@ -66,32 +45,43 @@ export default function App() {
 
     const onConnect = () => runAction(async () => {
         const user = await checkConnection();
-        const nextWalletState = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
-        setWalletState(nextWalletState);
-        return nextWalletState;
+        const next = user ? `Wallet: ${user.publicKey}` : "Wallet: not connected";
+        setWalletState(next);
+        return next;
     });
 
-    const onWrite = () => runAction(async () => submitEntry(payload()));
+    const onFile = () => runAction(async () => fileComplaint({
+        id: form.id.trim(),
+        reporter: form.reporter.trim(),
+        subject: form.subject.trim(),
+        description: form.description.trim(),
+        category: form.category.trim(),
+        severity: form.severity.trim(),
+    }));
 
-    const onUpdate = () => runAction(async () => {
-        const next = payload();
-        return trackEntry({
-            id: next.id,
-            state: next.state,
-            notes: next.notes,
-            updatedAt: next.updatedAt,
-        });
-    });
+    const onAssign = () => runAction(async () => assignComplaint({
+        id: form.id.trim(),
+        admin: form.admin.trim(),
+        assignee: form.assignee.trim(),
+    }));
 
-    const onRead = () => runAction(async () => {
-        const next = payload();
-        return resolveEntry(next.id);
-    });
+    const onResolve = () => runAction(async () => resolveComplaint({
+        id: form.id.trim(),
+        handler: form.handler.trim(),
+        resolutionNotes: form.resolutionNotes.trim(),
+    }));
 
-    const onList = () => runAction(async () => listIds());
+    const onEscalate = () => runAction(async () => escalateComplaint({
+        id: form.id.trim(),
+        reporter: form.reporter.trim(),
+    }));
+
+    const onGet = () => runAction(async () => getComplaint(form.id.trim()));
+
+    const onList = () => runAction(async () => listComplaints());
 
     const onCount = () => runAction(async () => {
-        const value = await getCount();
+        const value = await getComplaintCount();
         setCountValue(String(value));
         return { count: value };
     });
@@ -99,44 +89,64 @@ export default function App() {
     return (
         <main className="app">
             <section className="hero">
-                <p className="kicker">Stellar Soroban Project {meta.number}</p>
-                <h1>{meta.title}</h1>
+                <p className="kicker">Stellar Soroban Project 5</p>
+                <h1>Complaint / Issue Reporting System</h1>
                 <p className="subtitle">
-                    Theme: {meta.style}. Use this UI to {meta.writeAction}, {meta.updateAction}, and {meta.readAction} {meta.label} data.
+                    File complaints, assign handlers, escalate issues, and track resolutions on the Stellar blockchain.
                 </p>
                 <button type="button" id="connectWallet" onClick={onConnect} disabled={isBusy}>Connect Freighter</button>
                 <p id="walletState">{walletState}</p>
-                <p>Stored {meta.label} count: {countValue}</p>
+                <p>Total complaints: {countValue}</p>
             </section>
 
             <section className="panel">
-                <label htmlFor="entryId">ID (Symbol, &lt;= 32 chars)</label>
+                <h2>File a Complaint</h2>
+
+                <label htmlFor="entryId">Complaint ID (Symbol, &lt;= 32 chars)</label>
                 <input id="entryId" name="id" value={form.id} onChange={setField} />
 
-                <label htmlFor="owner">Owner Address</label>
-                <input id="owner" name="owner" value={form.owner} onChange={setField} placeholder="G..." />
+                <label htmlFor="reporter">Reporter Address</label>
+                <input id="reporter" name="reporter" value={form.reporter} onChange={setField} placeholder="G..." />
 
-                <label htmlFor="title">Title</label>
-                <input id="title" name="title" value={form.title} onChange={setField} />
+                <label htmlFor="subject">Subject</label>
+                <input id="subject" name="subject" value={form.subject} onChange={setField} />
 
-                <label htmlFor="state">State (Symbol)</label>
-                <input id="state" name="state" value={form.state} onChange={setField} />
+                <label htmlFor="description">Description</label>
+                <textarea id="description" name="description" rows="4" value={form.description} onChange={setField} />
 
-                <label htmlFor="amount">Amount (i128)</label>
-                <input id="amount" name="amount" value={form.amount} onChange={setField} type="number" />
+                <label htmlFor="category">Category (Symbol)</label>
+                <input id="category" name="category" value={form.category} onChange={setField} placeholder="service, billing, safety..." />
 
-                <label htmlFor="updatedAt">Updated At (u64)</label>
-                <input id="updatedAt" name="updatedAt" value={form.updatedAt} onChange={setField} type="number" />
-
-                <label htmlFor="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="4" value={form.notes} onChange={setField} />
+                <label htmlFor="severity">Severity (1-5, where 5 is most severe)</label>
+                <input id="severity" name="severity" value={form.severity} onChange={setField} type="number" min="1" max="5" />
 
                 <div className="actions">
-                    <button type="button" onClick={onWrite} disabled={isBusy}>{meta.writeAction} {meta.label}</button>
-                    <button type="button" onClick={onUpdate} disabled={isBusy}>{meta.updateAction} {meta.label}</button>
-                    <button type="button" onClick={onRead} disabled={isBusy}>{meta.readAction} {meta.label}</button>
-                    <button type="button" onClick={onList} disabled={isBusy}>list ids</button>
-                    <button type="button" onClick={onCount} disabled={isBusy}>get count</button>
+                    <button type="button" onClick={onFile} disabled={isBusy}>File Complaint</button>
+                    <button type="button" onClick={onEscalate} disabled={isBusy}>Escalate</button>
+                    <button type="button" onClick={onGet} disabled={isBusy}>Get Complaint</button>
+                    <button type="button" onClick={onList} disabled={isBusy}>List All</button>
+                    <button type="button" onClick={onCount} disabled={isBusy}>Get Count</button>
+                </div>
+            </section>
+
+            <section className="panel">
+                <h2>Assignment & Resolution</h2>
+
+                <label htmlFor="admin">Admin Address (for assignment)</label>
+                <input id="admin" name="admin" value={form.admin} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="assignee">Assignee / Handler Address</label>
+                <input id="assignee" name="assignee" value={form.assignee} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="handler">Handler Address (for resolution)</label>
+                <input id="handler" name="handler" value={form.handler} onChange={setField} placeholder="G..." />
+
+                <label htmlFor="resolutionNotes">Resolution Notes</label>
+                <textarea id="resolutionNotes" name="resolutionNotes" rows="3" value={form.resolutionNotes} onChange={setField} />
+
+                <div className="actions">
+                    <button type="button" onClick={onAssign} disabled={isBusy}>Assign Complaint</button>
+                    <button type="button" onClick={onResolve} disabled={isBusy}>Resolve Complaint</button>
                 </div>
             </section>
 

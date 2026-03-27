@@ -9,7 +9,7 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
+const toU32 = (value) => nativeToScVal(Number(value || 0), { type: "u32" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
 
 const requireConfig = () => {
@@ -89,41 +89,59 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const createEntry = async (payload) => {
+export const createPoll = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
-    if (!payload?.owner) throw new Error("owner address is required");
+    if (!payload?.creator) throw new Error("creator address is required");
 
-    return invokeWrite("create_item", [
+    return invokeWrite("create_poll", [
         toSymbol(payload.id),
-        new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        new Address(payload.creator).toScVal(),
+        nativeToScVal(payload.question || ""),
+        toU32(payload.optionsCount),
+        toU64(payload.endTime),
     ]);
 };
 
-export const voteEntry = async (payload) => {
-    if (!payload?.id) throw new Error("id is required");
+export const castVote = async (payload) => {
+    if (!payload?.pollId) throw new Error("pollId is required");
+    if (!payload?.voter) throw new Error("voter address is required");
 
-    return invokeWrite("vote_item", [
-        toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+    return invokeWrite("cast_vote", [
+        toSymbol(payload.pollId),
+        new Address(payload.voter).toScVal(),
+        toU32(payload.optionIndex),
     ]);
 };
 
-export const tallyEntry = async (id) => {
+export const closePoll = async (payload) => {
+    if (!payload?.pollId) throw new Error("pollId is required");
+    if (!payload?.creator) throw new Error("creator address is required");
+
+    return invokeWrite("close_poll", [
+        toSymbol(payload.pollId),
+        new Address(payload.creator).toScVal(),
+    ]);
+};
+
+export const getResults = async (pollId) => {
+    if (!pollId) throw new Error("pollId is required");
+    return invokeRead("get_results", [toSymbol(pollId)]);
+};
+
+export const getPoll = async (id) => {
     if (!id) throw new Error("id is required");
-    return invokeRead("tally_item", [toSymbol(id)]);
+    return invokeRead("get_poll", [toSymbol(id)]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const listPolls = async () => {
+    return invokeRead("list_polls", []);
 };
 
-export const getCount = async () => {
-    return invokeRead("get_count", []);
+export const hasVoted = async (pollId, voter) => {
+    if (!pollId) throw new Error("pollId is required");
+    if (!voter) throw new Error("voter address is required");
+    return invokeRead("has_voted", [
+        toSymbol(pollId),
+        new Address(voter).toScVal(),
+    ]);
 };

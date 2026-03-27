@@ -7,29 +7,38 @@ use soroban_sdk::{
 
 #[contracttype]
 #[derive(Clone)]
-pub struct PrepaidOrdersContractItem {
-    pub owner: Address,
-    pub title: String,
-    pub notes: String,
-    pub state: Symbol,
-    pub amount: i128,
+pub struct Order {
+    pub seller: Address,
+    pub buyer: Address,
+    pub description: String,
+    pub items_count: u32,
+    pub total_amount: i128,
+    pub paid_amount: i128,
+    pub tracking_info: String,
+    pub dispute_reason: String,
+    pub status: Symbol,
+    pub created_at: u64,
     pub updated_at: u64,
 }
 
 #[contracttype]
 #[derive(Clone)]
-pub enum PrepaidOrdersContractDataKey {
-    IdList,
-    Item(Symbol),
-    Count,
+pub enum OrderDataKey {
+    OrderList,
+    Order(Symbol),
 }
 
 #[contracterror]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
-pub enum PrepaidOrdersContractError {
-    InvalidTitle = 1,
-    InvalidTimestamp = 2,
+pub enum OrderError {
+    DescriptionEmpty = 1,
+    InvalidAmount = 2,
+    OrderNotFound = 3,
+    InsufficientPayment = 4,
+    InvalidStatus = 5,
+    NotSeller = 6,
+    NotBuyer = 7,
 }
 
 #[contract]
@@ -37,39 +46,16 @@ pub struct PrepaidOrdersContract;
 
 #[contractimpl]
 impl PrepaidOrdersContract {
-    fn count_key() -> PrepaidOrdersContractDataKey {
-        PrepaidOrdersContractDataKey::Count
+    fn order_key(id: &Symbol) -> OrderDataKey {
+        OrderDataKey::Order(id.clone())
     }
 
-    fn ids_key() -> PrepaidOrdersContractDataKey {
-        PrepaidOrdersContractDataKey::IdList
-    }
-
-    fn item_key(id: &Symbol) -> PrepaidOrdersContractDataKey {
-        PrepaidOrdersContractDataKey::Item(id.clone())
-    }
-
-    fn validate_item(env: &Env, title: &String, updated_at: u64) {
-        if title.len() == 0 {
-            panic_with_error!(env, PrepaidOrdersContractError::InvalidTitle);
-        }
-
-        if updated_at == 0 {
-            panic_with_error!(env, PrepaidOrdersContractError::InvalidTimestamp);
-        }
-    }
-
-    fn increment_count(env: &Env) {
-        let count: u32 = env.storage().instance().get(&Self::count_key()).unwrap_or(0);
-        env.storage().instance().set(&Self::count_key(), &(count + 1));
+    fn list_key() -> OrderDataKey {
+        OrderDataKey::OrderList
     }
 
     fn load_ids(env: &Env) -> Vec<Symbol> {
-        env.storage().instance().get(&Self::ids_key()).unwrap_or(Vec::new(env))
-    }
-
-    fn save_ids(env: &Env, ids: &Vec<Symbol>) {
-        env.storage().instance().set(&Self::ids_key(), ids);
+        env.storage().instance().get(&Self::list_key()).unwrap_or(Vec::new(env))
     }
 
     fn has_id(ids: &Vec<Symbol>, id: &Symbol) -> bool {
@@ -81,60 +67,135 @@ impl PrepaidOrdersContract {
         false
     }
 
-    pub fn create_item(env: Env, id: Symbol, owner: Address, title: String, notes: String, state: Symbol, amount: i128, updated_at: u64) {
-        owner.require_auth();
-        Self::validate_item(&env, &title, updated_at);
+    pub fn create_order(
+        env: Env,
+        id: Symbol,
+        seller: Address,
+        buyer: Address,
+        description: String,
+        items_count: u32,
+        total_amount: i128,
+    ) {
+        seller.require_auth();
 
-        let item = PrepaidOrdersContractItem {
-            owner,
-            title,
-            notes,
-            state,
-            amount,
-            updated_at,
+        if description.len() == 0 {
+            panic_with_error!(&env, OrderError::DescriptionEmpty);
+        }
+        if total_amount <= 0 {
+            panic_with_error!(&env, OrderError::InvalidAmount);
+        }
+
+        let now = env.ledger().timestamp();
+        let order = Order {
+            seller,
+            buyer,
+            description,
+            items_count,
+            total_amount,
+            paid_amount: 0,
+            tracking_info: String::from_str(&env, ""),
+            dispute_reason: String::from_str(&env, ""),
+            status: Symbol::new(&env, "created"),
+            created_at: now,
+            updated_at: now,
         };
 
-        let key = Self::item_key(&id);
-        let exists = env.storage().instance().has(&key);
-
-        env.storage().instance().set(&key, &item);
+        env.storage().instance().set(&Self::order_key(&id), &order);
 
         let mut ids = Self::load_ids(&env);
         if !Self::has_id(&ids, &id) {
             ids.push_back(id);
-            Self::save_ids(&env, &ids);
-            if !exists {
-                Self::increment_count(&env);
-            }
+            env.storage().instance().set(&Self::list_key(), &ids);
         }
     }
 
-    pub fn place_item(env: Env, id: Symbol, state: Symbol, notes: String, updated_at: u64) -> bool {
-        let key = Self::item_key(&id);
-        let maybe_item: Option<PrepaidOrdersContractItem> = env.storage().instance().get(&key);
+    pub fn pay_order(env: Env, id: Symbol, buyer: Address, payment_amount: i128) {
+        buyer.require_auth();
 
-        if let Some(mut item) = maybe_item {
-            Self::validate_item(&env, &item.title, updated_at);
-            item.owner.require_auth();
-            item.state = state;
-            item.notes = notes;
-            item.updated_at = updated_at;
-            env.storage().instance().set(&key, &item);
-            true
-        } else {
-            false
+        let key = Self::order_key(&id);
+        let maybe_order: Option<Order> = env.storage().instance().get(&key);
+        if maybe_order.is_none() {
+            panic_with_error!(&env, OrderError::OrderNotFound);
         }
+        let mut order = maybe_order.unwrap();
+
+        if payment_amount <= 0 {
+            panic_with_error!(&env, OrderError::InvalidAmount);
+        }
+
+        order.paid_amount += payment_amount;
+        order.status = Symbol::new(&env, "paid");
+        order.updated_at = env.ledger().timestamp();
+        env.storage().instance().set(&key, &order);
     }
 
-    pub fn fulfill_item(env: Env, id: Symbol) -> Option<PrepaidOrdersContractItem> {
-        env.storage().instance().get(&Self::item_key(&id))
+    pub fn confirm_order(env: Env, id: Symbol, seller: Address) {
+        seller.require_auth();
+
+        let key = Self::order_key(&id);
+        let maybe_order: Option<Order> = env.storage().instance().get(&key);
+        if maybe_order.is_none() {
+            panic_with_error!(&env, OrderError::OrderNotFound);
+        }
+        let mut order = maybe_order.unwrap();
+
+        order.status = Symbol::new(&env, "confirmed");
+        order.updated_at = env.ledger().timestamp();
+        env.storage().instance().set(&key, &order);
     }
 
-    pub fn list_ids(env: Env) -> Vec<Symbol> {
+    pub fn ship_order(env: Env, id: Symbol, seller: Address, tracking_info: String) {
+        seller.require_auth();
+
+        let key = Self::order_key(&id);
+        let maybe_order: Option<Order> = env.storage().instance().get(&key);
+        if maybe_order.is_none() {
+            panic_with_error!(&env, OrderError::OrderNotFound);
+        }
+        let mut order = maybe_order.unwrap();
+
+        order.tracking_info = tracking_info;
+        order.status = Symbol::new(&env, "shipped");
+        order.updated_at = env.ledger().timestamp();
+        env.storage().instance().set(&key, &order);
+    }
+
+    pub fn deliver_order(env: Env, id: Symbol, seller: Address) {
+        seller.require_auth();
+
+        let key = Self::order_key(&id);
+        let maybe_order: Option<Order> = env.storage().instance().get(&key);
+        if maybe_order.is_none() {
+            panic_with_error!(&env, OrderError::OrderNotFound);
+        }
+        let mut order = maybe_order.unwrap();
+
+        order.status = Symbol::new(&env, "delivered");
+        order.updated_at = env.ledger().timestamp();
+        env.storage().instance().set(&key, &order);
+    }
+
+    pub fn dispute_order(env: Env, id: Symbol, buyer: Address, reason: String) {
+        buyer.require_auth();
+
+        let key = Self::order_key(&id);
+        let maybe_order: Option<Order> = env.storage().instance().get(&key);
+        if maybe_order.is_none() {
+            panic_with_error!(&env, OrderError::OrderNotFound);
+        }
+        let mut order = maybe_order.unwrap();
+
+        order.dispute_reason = reason;
+        order.status = Symbol::new(&env, "disputed");
+        order.updated_at = env.ledger().timestamp();
+        env.storage().instance().set(&key, &order);
+    }
+
+    pub fn get_order(env: Env, id: Symbol) -> Option<Order> {
+        env.storage().instance().get(&Self::order_key(&id))
+    }
+
+    pub fn list_orders(env: Env) -> Vec<Symbol> {
         Self::load_ids(&env)
-    }
-
-    pub fn get_count(env: Env) -> u32 {
-        env.storage().instance().get(&Self::count_key()).unwrap_or(0)
     }
 }

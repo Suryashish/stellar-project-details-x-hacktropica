@@ -9,8 +9,8 @@ const NETWORK_PASSPHRASE = Networks.TESTNET;
 const server = new rpc.Server(RPC_URL);
 
 const toSymbol = (value) => xdr.ScVal.scvSymbol(String(value));
-const toI128 = (value) => nativeToScVal(BigInt(value || 0), { type: "i128" });
 const toU64 = (value) => nativeToScVal(BigInt(value || 0), { type: "u64" });
+const toU32 = (value) => nativeToScVal(value, { type: "u32" });
 
 const requireConfig = () => {
     if (!CONTRACT_ID) throw new Error("Set CONTRACT_ID in lib.js/stellar.js");
@@ -89,39 +89,54 @@ const invokeRead = async (method, args = []) => {
     throw new Error(sim.error || `Read simulation failed: ${method}`);
 };
 
-export const addEntry = async (payload) => {
+export const registerResource = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
     if (!payload?.owner) throw new Error("owner address is required");
 
-    return invokeWrite("add_item", [
+    return invokeWrite("register_resource", [
         toSymbol(payload.id),
         new Address(payload.owner).toScVal(),
-        nativeToScVal(payload.title || ""),
-        nativeToScVal(payload.notes || ""),
-        toSymbol(payload.state || "open"),
-        toI128(payload.amount),
-        toU64(payload.updatedAt),
+        nativeToScVal(payload.name || ""),
+        toSymbol(payload.resourceType || "room"),
+        toU32(Number(payload.capacity) || 1),
+        nativeToScVal(payload.location || ""),
     ]);
 };
 
-export const checkEntry = async (payload) => {
+export const reserveResource = async (payload) => {
     if (!payload?.id) throw new Error("id is required");
+    if (!payload?.reserver) throw new Error("reserver address is required");
 
-    return invokeWrite("check_item", [
+    return invokeWrite("reserve_resource", [
         toSymbol(payload.id),
-        toSymbol(payload.state || "open"),
-        nativeToScVal(payload.notes || ""),
-        toU64(payload.updatedAt),
+        new Address(payload.reserver).toScVal(),
+        toU64(payload.startTime),
+        toU64(payload.endTime),
     ]);
 };
 
-export const reserveEntry = async (id) => {
-    if (!id) throw new Error("id is required");
-    return invokeRead("reserve_item", [toSymbol(id)]);
+export const releaseResource = async (payload) => {
+    if (!payload?.id) throw new Error("id is required");
+    if (!payload?.reserver) throw new Error("reserver address is required");
+
+    return invokeWrite("release_resource", [
+        toSymbol(payload.id),
+        new Address(payload.reserver).toScVal(),
+    ]);
 };
 
-export const listIds = async () => {
-    return invokeRead("list_ids", []);
+export const checkAvailability = async (id) => {
+    if (!id) throw new Error("id is required");
+    return invokeRead("check_availability", [toSymbol(id)]);
+};
+
+export const getResource = async (id) => {
+    if (!id) throw new Error("id is required");
+    return invokeRead("get_resource", [toSymbol(id)]);
+};
+
+export const listResources = async () => {
+    return invokeRead("list_resources", []);
 };
 
 export const getCount = async () => {
