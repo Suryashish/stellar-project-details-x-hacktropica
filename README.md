@@ -16,7 +16,7 @@ A collection of 35 Soroban smart contract projects with React frontends. Each pr
 ### Step 1 -- Clone the repo and set up a fresh project
 
 ```bash
-git clone <this-repo-url> my-stellar-app
+git clone https://github.com/Suryashish/base-project-stellar-x-Hacktropica my-stellar-app
 cd my-stellar-app
 ```
 
@@ -29,14 +29,9 @@ git add .
 git commit -m "Initial commit"
 ```
 
-### Step 2 -- Install dependencies
+This base project already includes the starter setup, so there is no separate dependency-install step in this guide.
 
-```bash
-npm install
-npm install @stellar/stellar-sdk @stellar/freighter-api
-```
-
-### Step 3 -- Pick a project and copy the code
+### Step 2 -- Pick a project and copy the code
 
 Open this repository in your browser to browse all the project folders (01 through 39). Pick the project you want to build.
 
@@ -56,14 +51,14 @@ Copy the contents of each file into your Vite project:
 2. Copy the content from `frontend/app.css` and paste it into `src/App.css` in your project
 3. Create a folder `src/lib/` and copy the content from `lib.js/stellar.js` into `src/lib/stellar.js`
 
-### Step 4 -- Fix the imports in App.jsx
+### Step 3 -- Fix the imports in App.jsx
 
 Open `src/App.jsx` and make these two changes at the top of the file:
 
 1. Change the stellar.js import path from `"../lib.js/stellar.js"` to `"../lib/stellar.js"`
 2. Add this CSS import line at the top: `import "./App.css";`
 
-### Step 5 -- Install the Freighter wallet
+### Step 4 -- Install the Freighter wallet
 
 1. Open this link in Chrome: https://chromewebstore.google.com/detail/freighter/bcacfldlkkdogcmkkibnjlakofdplcbk?hl=en-GB&utm_source=ext_sidebar
 2. Click **Add to Chrome** and install the extension
@@ -71,14 +66,14 @@ Open `src/App.jsx` and make these two changes at the top of the file:
 4. Enter a password and remember it
 5. On the next page about the seed phrase, click **Do this later**
 
-### Step 6 -- Switch to Testnet and fund your wallet
+### Step 5 -- Switch to Testnet and fund your wallet
 
 1. Click the Freighter extension icon to open it
 2. Click the **globe icon** in the top-left corner
 3. Select **Testnet**
 4. Click **Fund with Friendbot** -- this gives you free test XLM
 
-### Step 7 -- Deploy your smart contract
+### Step 6 -- Deploy your smart contract
 
 1. Open https://app.stacyide.xyz/ in your browser
 2. Click **Connect** in the top right
@@ -96,7 +91,7 @@ Open `src/App.jsx` and make these two changes at the top of the file:
 14. Another modal will appear -- click **Confirm** again
 15. You will get a **Contract ID** -- copy it
 
-### Step 8 -- Configure your project with the Contract ID and wallet address
+### Step 7 -- Configure your project with the Contract ID and wallet address
 
 1. Open `src/lib/stellar.js` in VS Code
 2. Find the line `export const CONTRACT_ID = "";` and paste your Contract ID between the quotes
@@ -107,7 +102,7 @@ Open `src/App.jsx` and make these two changes at the top of the file:
    - Click **Copy Address**
 4. Paste your wallet address between the quotes for `DEMO_ADDR`
 
-### Step 9 -- Run your app
+### Step 8 -- Run your app
 
 ```bash
 npm run dev
@@ -115,7 +110,7 @@ npm run dev
 
 Open the URL shown in the terminal (usually http://localhost:5173). Your app is now running and connected to your deployed smart contract on the Stellar testnet.
 
-### Step 10 -- Polish your project for submission
+### Step 9 -- Polish your project for submission
 
 1. **Improve the UI** -- Style your app, add a landing page / hero section that explains what the project does
 2. **Create a README.md** -- Add a `README.md` file in your project root with:
